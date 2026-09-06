@@ -7,10 +7,11 @@ spring:
   data:
     mongodb:
       uri: ${AUTH_MONGODB_URI}
-      database: ${AUTH_MONGODB_DATABASE:binitech_pdv}
+      database: ${AUTH_MONGODB_DATABASE:binitech_auth}
       auto-index-creation: true
-    redis:
-      url: ${AUTH_REDIS_URL}
+auth:
+  service-key: ${AUTH_SERVICE_KEY}
+  application-id: ${AUTH_APPLICATION_ID:pdv}
 server:
   port: ${PORT:8081}
   error:

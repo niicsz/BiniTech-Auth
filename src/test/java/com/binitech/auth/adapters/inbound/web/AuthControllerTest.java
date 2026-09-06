@@ -24,8 +24,11 @@ import org.springframework.test.web.servlet.MockMvc;
 @WebMvcTest(
     controllers = AuthController.class,
     properties = {
-      "jwt.secret=test-secret-key-with-at-least-32-bytes", "jwt.access-expiration=60000",
-      "jwt.refresh-expiration=86400000", "security.pepper=test-pepper",
+      "auth.service-key=test-machine-key-with-at-least-32-bytes",
+      "jwt.secret=test-secret-key-with-at-least-32-bytes",
+      "jwt.access-expiration=60000",
+      "jwt.refresh-expiration=86400000",
+      "security.pepper=test-pepper",
       "cors.allowed-origins=https://pdv.example,https://other.example"
     })
 @Import({
@@ -42,6 +45,7 @@ class AuthControllerTest {
   @MockitoBean IdentityRepositoryPort identities;
   @MockitoBean RefreshSessionRepositoryPort sessions;
   @MockitoBean SessionRevocationPort revocations;
+  @MockitoBean AccountRepositoryPort accounts;
   private Identity user;
 
   @BeforeEach

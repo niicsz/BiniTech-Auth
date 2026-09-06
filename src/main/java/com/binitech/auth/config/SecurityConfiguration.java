@@ -17,15 +17,22 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 @Configuration
 public class SecurityConfiguration {
   @Bean
-  SecurityFilterChain security(HttpSecurity http) throws Exception {
+  SecurityFilterChain security(HttpSecurity http, @Value("${auth.service-key}") String serviceKey)
+      throws Exception {
     return http.cors(Customizer.withDefaults())
         // Only JSON requests and explicit bearer tokens are used; no cookie authentication.
-        .csrf(csrf -> csrf.ignoringRequestMatchers("/api/auth/**"))
+        .csrf(csrf -> csrf.ignoringRequestMatchers("/api/auth/**", "/api/internal/**"))
+        .addFilterBefore(
+            new ServiceCredentialFilter(serviceKey),
+            org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
+                .class)
         .sessionManagement(
             session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(
             auth ->
-                auth.requestMatchers(
+                auth.requestMatchers("/api/internal/**")
+                    .hasRole("IDENTITY_CLIENT")
+                    .requestMatchers(
                         HttpMethod.POST, "/api/auth/login", "/api/auth/refresh", "/api/auth/logout")
                     .permitAll()
                     .requestMatchers(

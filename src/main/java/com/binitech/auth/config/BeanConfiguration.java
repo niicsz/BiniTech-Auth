@@ -11,6 +11,16 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class BeanConfiguration {
   @Bean
+  public com.binitech.auth.application.ports.inbound.AccountLifecycle accountLifecycle(
+      AccountRepositoryPort accounts,
+      PasswordHashPort passwords,
+      SessionRevocationPort revocations,
+      Clock clock) {
+    return new com.binitech.auth.application.usecases.AccountLifecycleUseCase(
+        accounts, passwords, revocations, clock);
+  }
+
+  @Bean
   public Clock clock() {
     return Clock.systemUTC();
   }

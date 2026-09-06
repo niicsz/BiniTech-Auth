@@ -15,12 +15,11 @@ src/main/java/com/binitech/auth/
 │   ├── inbound/web/                 HTTP, validação de requisições e tradução de erros
 │   └── outbound/
 │       ├── persistence/             Adaptadores MongoDB e documentos de persistência
-│       ├── cache/                   Revogação de sessões no Redis
 │       └── security/                JWT e Argon2 + pepper
 └── config/                         Composição dos beans, relógio, segurança HTTP e CORS
 ```
 
-As dependências apontam para dentro. O domínio depende somente do JDK; a aplicação depende do domínio e das suas portas. Controllers usam a porta de entrada. MongoDB, Redis, JWT e hashing implementam portas de saída. `BeanConfiguration` conecta as implementações, e o relógio é injetado para permitir testes determinísticos. Os documentos MongoDB ficam fora do domínio.
+As dependências apontam para dentro. Domínio e aplicação usam somente Java e portas. MongoDB, JWT e hashing implementam portas de saída. `BeanConfiguration` conecta as implementações. `AccountLifecycleUseCase` controla provisionamento idempotente, troca de senha, recuperação e revogação; os adaptadores executam atualizações atômicas em um único documento, compatíveis com MongoDB standalone.
 
 `HexagonalArchitectureTest` compila o domínio com classpath vazio e depois compila a aplicação usando somente as classes do núcleo. Uma dependência de Spring, JWT, persistência ou de adaptadores no núcleo quebra o teste. Os testes de caso de uso usam portas simuladas; os testes HTTP e de fluxo exercitam a composição e os adaptadores de segurança.
 
@@ -41,7 +40,7 @@ Login e refresh retornam:
   "accessToken": "<jwt>",
   "refreshToken": "<token opaco>",
   "username": "operador",
-  "role": "OPERATOR",
+  "role": null,
   "tenantId": "<id da loja>"
 }
 ```
@@ -52,20 +51,27 @@ Aplicações podem consultar `/api/auth/session` pelo backend, sem receber segre
 
 ## Persistência e compatibilidade
 
-As coleções `users` e `refresh_tokens` e as chaves Redis `user:session-version:` e `token:blacklist:` permanecem compatíveis com o PDV. Os adaptadores convertem documentos antigos em objetos do domínio, inclusive documentos com o `_class` da primeira versão do Auth. Nenhuma migração de senha é necessária.
+O Auth é o único dono do banco `binitech_auth`: `identities`, `refresh_tokens`, `revoked_tokens` e controle da migração. Não acessa MongoDB ou Redis do PDV. Os IDs legados são preservados como texto, inclusive quando têm formato ObjectId. O PDV mantém seus vínculos e permissões locais; `role` não é uma autorização global e fica nulo para identidades migradas.
 
-Logins simultâneos preservam refresh tokens anteriores. Cada refresh é consumido atomicamente e pode ser usado uma única vez. O logout invalida o access token apresentado e remove os refresh tokens do usuário/tenant; outros access tokens continuam até expirar. Troca de senha no PDV revoga todas as sessões via versão no Redis. Refresh tokens legados sem versão são tratados como versão zero. Usuários inativos não podem usar nem renovar sessões.
+Cada refresh é consumido atomicamente uma única vez. O logout invalida o access token apresentado e remove refresh tokens do usuário/tenant; outros access tokens continuam até expirar. Troca/redefinição de senha incrementa a versão de sessão na mesma atualização atômica do hash. O PDV consulta `/session` a cada requisição autenticada e verifica seu vínculo local; indisponibilidade do Auth falha de forma fechada.
 
-O serviço cria índices de unicidade do refresh token e TTL de expiração no MongoDB. Cadastro, recuperação/troca de senha e políticas de lojas/planos permanecem no PDV. A separação de repositórios e execução está completa; nesta etapa o armazenamento das identidades ainda é compartilhado.
+Tokens de recuperação são armazenados somente como SHA-256 e consumidos atomicamente. O contato de recuperação legado é migrado explicitamente como `legacy-tenant-billing-contact`, não como e-mail pessoal verificado. O PDV permanece adaptador de entrega de e-mail; não escolhe o destinatário nem armazena o token. A identidade do administrador de plataforma é migrada com credencial gerenciada, sem sincronizar senhas no startup do PDV.
+
+### API interna de ciclo de vida
+
+Todos os `POST /api/internal/identities/{provision,change-password,recovery,reset-password,revoke}` exigem `X-Auth-Service-Key`. Tokens de usuário não concedem esse acesso. A chave é vinculada ao namespace `AUTH_APPLICATION_ID` (inicialmente `pdv`); operações de ciclo de vida filtram esse namespace. Não compartilhe essa chave com navegadores ou clientes não confiáveis. Novas aplicações precisam de uma política de cadastro/namespace e credenciais próprias antes de receber acesso administrativo.
+
+O endpoint interno de recuperação retorna destinatário/token apenas ao adaptador de e-mail autenticado. A API pública do PDV nunca devolve esses dados. Não há callbacks nem destinatários arbitrários na solicitação de recuperação.
 
 ## Configuração
 
 | Variável | Uso/padrão |
 | --- | --- |
 | `AUTH_MONGODB_URI` | Conexão MongoDB, obrigatória |
-| `AUTH_MONGODB_DATABASE` | Banco; `binitech_pdv` |
-| `AUTH_REDIS_URL` | Conexão Redis e mesmo índice de banco do PDV |
-| `JWT_SECRET` | Mesma chave do PDV, pelo menos 32 bytes |
+| `AUTH_MONGODB_DATABASE` | Banco exclusivo; `binitech_auth` |
+| `AUTH_SERVICE_KEY` | Credencial interna, pelo menos 32 caracteres |
+| `AUTH_APPLICATION_ID` | Namespace administrativo; `pdv` |
+| `JWT_SECRET` | Chave exclusiva do Auth, pelo menos 32 bytes; não entregue ao PDV |
 | `SECURITY_PEPPER` | Mesmo pepper dos hashes existentes |
 | `JWT_ACCESS_EXPIRATION` | Validade em ms; `900000` |
 | `JWT_REFRESH_EXPIRATION` | Validade em ms; `86400000` |
@@ -86,7 +92,11 @@ No Windows, use `.\mvnw.cmd`. Cada comando funciona na raiz deste repositório, 
 
 Projeto `steadfast-growth`, ambiente `production`, serviço `BiniTech-Auth`. O Dockerfile fica na raiz deste repositório. Use `RAILWAY_DOCKERFILE_PATH=Dockerfile`, `PORT=8081` e a branch `main` como origem GitHub. `railway.json` configura `/actuator/health` antes da troca de deployment.
 
-As variáveis de MongoDB, Redis, JWT, pepper e CORS usam referências `${{BiniTech-PDV.NOME_DA_VARIAVEL}}`. O backend PDV continua usando `AUTH_SERVICE_URL=http://${{BiniTech-Auth.RAILWAY_PRIVATE_DOMAIN}}:8081`.
+MongoDB e segredos de autenticação são próprios do Auth. O usuário `binitech_auth_app` recebe somente `readWrite` em `binitech_auth`; não recebe acesso ao banco de backup ou aos dados do PDV. O backend usa `AUTH_SERVICE_URL=http://${{BiniTech-Auth.RAILWAY_PRIVATE_DOMAIN}}:8081` e a credencial interna. Não há Redis no Auth.
+
+## Migração e operação
+
+Veja [procedimento de migração](docs/database-isolation.md). O script usa credenciais de ambiente, faz cópia verificável e não imprime dados pessoais/hashes. A troca exige interromper escritores antigos, preservar o pepper e invalidar sessões antigas por rotação da chave JWT. Não execute novamente a cópia sobre um Auth já em uso.
 
 ```sh
 railway up --project 0fb63aa2-ccbd-4dcb-a451-6324960b0b22 --environment production --service BiniTech-Auth --detach

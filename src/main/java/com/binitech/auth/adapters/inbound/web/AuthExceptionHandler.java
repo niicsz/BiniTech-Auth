@@ -18,7 +18,11 @@ public class AuthExceptionHandler {
         HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "Credenciais ou sessão inválidas.");
   }
 
-  @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class})
+  @ExceptionHandler({
+    MethodArgumentNotValidException.class,
+    HttpMessageNotReadableException.class,
+    IllegalArgumentException.class
+  })
   ResponseEntity<ErrorResponse> invalidRequest() {
     return error(
         HttpStatus.BAD_REQUEST,
