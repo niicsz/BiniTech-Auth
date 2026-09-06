@@ -77,27 +77,6 @@ O endpoint interno de recuperação retorna destinatário/token apenas ao adapta
 | `JWT_REFRESH_EXPIRATION` | Validade em ms; `86400000` |
 | `AUTH_CORS_ALLOWED_ORIGINS` | Origens separadas por vírgula; `http://localhost:4200` |
 | `PORT` | `8081` |
-
-Exporte as variáveis no processo. O serviço não lê `.env` automaticamente. Nunca versione segredos.
-
-```sh
-./mvnw verify
-java -jar target/auth-service-1.0.0.jar
-docker build -t binitech-auth .
-```
-
-No Windows, use `.\mvnw.cmd`. Cada comando funciona na raiz deste repositório, sem checkout do PDV. As versões das dependências foram preservadas na extração; os alertas OWASP relatados no PR #80 do PDV ainda exigem triagem e atualização separadas.
-
-## Railway
-
-Projeto `steadfast-growth`, ambiente `production`, serviço `BiniTech-Auth`. O Dockerfile fica na raiz deste repositório. Use `RAILWAY_DOCKERFILE_PATH=Dockerfile`, `PORT=8081` e a branch `main` como origem GitHub. `railway.json` configura `/actuator/health` antes da troca de deployment.
-
-MongoDB e segredos de autenticação são próprios do Auth. O usuário `binitech_auth_app` recebe somente `readWrite` em `binitech_auth`; não recebe acesso ao banco de backup ou aos dados do PDV. O backend usa `AUTH_SERVICE_URL=http://${{BiniTech-Auth.RAILWAY_PRIVATE_DOMAIN}}:8081` e a credencial interna. Não há Redis no Auth.
-
-## Migração e operação
-
-Veja [procedimento de migração](docs/database-isolation.md). O script usa credenciais de ambiente, faz cópia verificável e não imprime dados pessoais/hashes. A troca exige interromper escritores antigos, preservar o pepper e invalidar sessões antigas por rotação da chave JWT. Não execute novamente a cópia sobre um Auth já em uso.
-
 ```sh
 railway up --project 0fb63aa2-ccbd-4dcb-a451-6324960b0b22 --environment production --service BiniTech-Auth --detach
 ```
