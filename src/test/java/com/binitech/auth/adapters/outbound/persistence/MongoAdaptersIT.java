@@ -10,7 +10,6 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
-/** Explicit opt-in: only the fixed disposable test database is touched, never production data. */
 @EnabledIfEnvironmentVariable(named = "AUTH_TEST_MONGODB_URI", matches = ".+")
 class MongoAdaptersIT {
   static MongoClient client;

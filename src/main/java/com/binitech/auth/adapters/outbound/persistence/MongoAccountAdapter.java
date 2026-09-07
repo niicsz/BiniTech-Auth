@@ -38,7 +38,6 @@ public class MongoAccountAdapter implements AccountRepositoryPort {
   }
 
   public Account provision(Account a) {
-    // Raw driver keeps legacy ObjectId-shaped identity strings as strings.
     Document fields =
         new Document("username", a.username())
             .append("password", a.password())

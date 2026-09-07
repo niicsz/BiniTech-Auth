@@ -58,7 +58,6 @@ public class LoginUseCase implements AuthenticationUseCase {
     if (matches != 1 || !match.isActive()) {
       throw new InvalidCredentialsException();
     }
-    // Independent logins can coexist, allowing several applications to use the identity service.
     return issueSession(match, revocations.sessionVersion(match.id()));
   }
 

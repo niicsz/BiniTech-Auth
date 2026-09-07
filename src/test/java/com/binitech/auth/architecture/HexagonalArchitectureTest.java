@@ -15,7 +15,6 @@ class HexagonalArchitectureTest {
 
   @Test
   void coreCompilesWithoutFrameworksAndDependenciesPointInward() throws Exception {
-    // Domain must compile with only the JDK. Application may depend only on that domain and itself.
     compile("domain");
     compile("application");
   }
