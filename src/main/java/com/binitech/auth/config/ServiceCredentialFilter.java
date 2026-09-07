@@ -13,7 +13,6 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-/** Machine credential grants lifecycle operations for the configured application only. */
 public class ServiceCredentialFilter extends OncePerRequestFilter {
   private final byte[] credential;
 
