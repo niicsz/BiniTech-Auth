@@ -20,7 +20,7 @@ public class SecurityConfiguration {
   SecurityFilterChain security(HttpSecurity http, @Value("${auth.service-key}") String serviceKey)
       throws Exception {
     return http.cors(Customizer.withDefaults())
-        // Only JSON requests and explicit bearer tokens are used; no cookie authentication.
+      
         .csrf(csrf -> csrf.ignoringRequestMatchers("/api/auth/**", "/api/internal/**"))
         .addFilterBefore(
             new ServiceCredentialFilter(serviceKey),
