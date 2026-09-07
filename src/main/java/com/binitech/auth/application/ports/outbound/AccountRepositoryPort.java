@@ -10,10 +10,8 @@ public interface AccountRepositoryPort {
 
   List<Account> findByUsername(String username);
 
-  /** Insert once; a retry must not replace credentials or another identity. */
   Account provision(Account account);
 
-  /** Atomically changes credentials, increments the session version and clears recovery tokens. */
   boolean changePassword(String id, String expectedHash, String replacementHash);
 
   void requestRecovery(String id, String expectedHash, String tokenDigest, Instant expiresAt);
