@@ -61,8 +61,15 @@ public class AuthController {
   @PostMapping("/logout")
   public ResponseEntity<Void> logout(
       @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
-    login.logout(bearer(authorization));
-    return ResponseEntity.noContent().build();
+    log.info("Logout recebido");
+    try {
+      login.logout(bearer(authorization));
+      log.info("Logout concluído");
+      return ResponseEntity.noContent().build();
+    } catch (InvalidCredentialsException exception) {
+      log.warn("Logout recusado: credenciais ou sessão inválidas");
+      throw exception;
+    }
   }
 
   private String bearer(String authorization) {
