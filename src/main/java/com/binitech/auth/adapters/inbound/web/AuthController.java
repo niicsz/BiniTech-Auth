@@ -7,6 +7,8 @@ import com.binitech.auth.domain.exception.InvalidCredentialsException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
+  private static final Logger log = LoggerFactory.getLogger(AuthController.class);
   private final AuthenticationUseCase login;
 
   public AuthController(AuthenticationUseCase login) {
@@ -27,7 +30,21 @@ public class AuthController {
 
   @PostMapping("/login")
   public AuthResult login(@Valid @RequestBody LoginRequest request) {
-    return login.login(request.username(), request.password(), request.tenantId());
+    String username = mask(request.username());
+    String tenantId = mask(request.tenantId());
+    log.info("Login recebido: username={} tenantId={}", username, tenantId);
+    try {
+      AuthResult result = login.login(request.username(), request.password(), request.tenantId());
+      log.info(
+          "Login concluído: username={} tenantId={} role={}",
+          username,
+          mask(result.tenantId()),
+          result.role());
+      return result;
+    } catch (InvalidCredentialsException exception) {
+      log.warn("Login recusado: username={} tenantId={}", username, tenantId);
+      throw exception;
+    }
   }
 
   @PostMapping("/refresh")
@@ -63,4 +80,14 @@ public class AuthController {
       @Size(max = 200) String tenantId) {}
 
   public record RefreshRequest(@NotBlank @Size(max = 200) String refreshToken) {}
+
+  private String mask(String value) {
+    if (value == null || value.isBlank()) {
+      return "-";
+    }
+    if (value.length() <= 2) {
+      return "**";
+    }
+    return value.charAt(0) + "***" + value.charAt(value.length() - 1);
+  }
 }
