@@ -37,6 +37,29 @@ class MongoAdaptersIT {
   }
 
   @Test
+  void purgeTenantRemovesOnlyThatTenantIdentitiesAndSessions() {
+    accounts.provision(new Account("a1", "ana", "hash", "t1", true, false, null));
+    accounts.provision(new Account("a2", "bia", "hash", "t1", true, false, null));
+    accounts.provision(new Account("b1", "ana", "hash", "t2", true, false, null));
+    new MongoAccountAdapter(mongo, "another-app")
+        .provision(new Account("x1", "ana", "hash", "t1", true, false, null));
+    mongo
+        .getCollection("refresh_tokens")
+        .insertOne(new org.bson.Document("token", "r1").append("tenantId", "t1"));
+    mongo
+        .getCollection("refresh_tokens")
+        .insertOne(new org.bson.Document("token", "r2").append("tenantId", "t2"));
+
+    assertEquals(2, accounts.purgeTenant("t1"));
+
+    assertTrue(accounts.find("a1").isEmpty());
+    assertTrue(accounts.find("a2").isEmpty());
+    assertTrue(accounts.find("b1").isPresent());
+    assertTrue(new MongoAccountAdapter(mongo, "another-app").find("x1").isPresent());
+    assertEquals(1, mongo.getCollection("refresh_tokens").countDocuments());
+  }
+
+  @Test
   void preservesObjectIdShapedStringIdentityAndInsertOnlyCredentials() {
     String id = "507f1f77bcf86cd799439011";
     Account original =

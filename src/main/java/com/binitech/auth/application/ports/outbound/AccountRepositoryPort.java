@@ -17,4 +17,6 @@ public interface AccountRepositoryPort {
   void requestRecovery(String id, String expectedHash, String tokenDigest, Instant expiresAt);
 
   boolean completeRecovery(String tokenDigest, String replacementHash, Instant now);
+
+  long purgeTenant(String tenantId);
 }
