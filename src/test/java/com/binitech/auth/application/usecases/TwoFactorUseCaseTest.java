@@ -33,6 +33,17 @@ class TwoFactorUseCaseTest {
   }
 
   @Test
+  void statusReportsEnabledAndActiveLockOnly() {
+    assertEquals(new TwoFactorStatus(false, null), useCase.status("access"));
+    when(twoFactor.find("user1"))
+        .thenReturn(Optional.of(new TwoFactorEnrollment("active", null, 1L, now.minusSeconds(1))));
+    assertEquals(new TwoFactorStatus(true, null), useCase.status("access"));
+    when(twoFactor.find("user1"))
+        .thenReturn(Optional.of(new TwoFactorEnrollment("active", null, 1L, now.plusSeconds(60))));
+    assertEquals(new TwoFactorStatus(true, now.plusSeconds(60)), useCase.status("access"));
+  }
+
+  @Test
   void setupStoresPendingSecretAndReturnsProvisioning() {
     var setup = new TwoFactorSetup("c2VjcmV0", "otpauth://totp/x", "SHA512", 6, 30);
     when(totp.provision("ana")).thenReturn(setup);

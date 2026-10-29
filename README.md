@@ -32,6 +32,7 @@ As dependências apontam para dentro. Domínio e aplicação usam somente Java e
 | `POST /api/auth/refresh` | JSON `refreshToken` | 200, novos tokens |
 | `GET /api/auth/session` | `Authorization: Bearer <accessToken>` | 200, `userId`, `username`, `role`, `tenantId` |
 | `POST /api/auth/logout` | `Authorization: Bearer <accessToken>` | 204 |
+| `GET /api/auth/two-factor` | `Authorization: Bearer <accessToken>` | 200, `enabled`, `lockedUntil` |
 | `POST /api/auth/two-factor/setup` | `Authorization: Bearer <accessToken>` | 200, `secret` (base64), `otpauthUri`, `algorithm`, `digits`, `period` |
 | `POST /api/auth/two-factor/enable` | Bearer + JSON `code` | 204 |
 | `POST /api/auth/two-factor/disable` | Bearer + JSON `code` | 204 |

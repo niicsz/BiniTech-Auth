@@ -44,6 +44,7 @@ public class SecurityConfiguration {
                     .requestMatchers(
                         HttpMethod.GET,
                         "/api/auth/session",
+                        "/api/auth/two-factor",
                         "/actuator/health",
                         "/actuator/health/**")
                     .permitAll()
