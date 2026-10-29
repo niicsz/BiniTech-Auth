@@ -28,9 +28,13 @@ As dependências apontam para dentro. Domínio e aplicação usam somente Java e
 | Método e caminho | Entrada | Sucesso |
 | --- | --- | --- |
 | `POST /api/auth/login` | JSON `username`, `password`, `tenantId` opcional | 200, tokens e identidade |
+| `POST /api/auth/login/two-factor` | JSON `challengeToken`, `code` | 200, tokens e identidade |
 | `POST /api/auth/refresh` | JSON `refreshToken` | 200, novos tokens |
 | `GET /api/auth/session` | `Authorization: Bearer <accessToken>` | 200, `userId`, `username`, `role`, `tenantId` |
 | `POST /api/auth/logout` | `Authorization: Bearer <accessToken>` | 204 |
+| `POST /api/auth/two-factor/setup` | `Authorization: Bearer <accessToken>` | 200, `secret` (base64), `otpauthUri`, `algorithm`, `digits`, `period` |
+| `POST /api/auth/two-factor/enable` | Bearer + JSON `code` | 204 |
+| `POST /api/auth/two-factor/disable` | Bearer + JSON `code` | 204 |
 | `GET /actuator/health` | Nenhuma | 200 quando saudável |
 
 Login e refresh retornam:
@@ -49,9 +53,15 @@ Credenciais/sessões inválidas retornam 401, requisições inválidas retornam 
 
 Aplicações podem consultar `/api/auth/session` pelo backend, sem receber segredos JWT ou credenciais de banco. Configure uma URL fixa e timeout, use HTTPS fora de desenvolvimento e rejeite a operação se a sessão não puder ser validada. CORS autoriza somente as origens configuradas e não substitui autorização de usuários.
 
+## Segundo fator (TOTP)
+
+TOTP conforme RFC 6238 com HMAC-SHA512 (padrão) ou HMAC-SHA256. A chave é gerada com `SecureRandom` no tamanho da saída do hash (64 bytes para SHA512, 32 para SHA256) e trafega/é armazenada em base64. O código é calculado com o contador `floor(epochSeconds / período)` em 8 bytes big-endian, HMAC com a chave e truncamento dinâmico (offset nos 4 bits finais do hash, 31 bits, módulo `10^dígitos`). A `otpauthUri` leva a mesma chave em base32 para leitura por QR code; nem todo aplicativo autenticador respeita `algorithm=SHA512`.
+
+Ativação: `setup` gera uma chave pendente; `enable` confirma com um código válido. Com 2FA ativo, `login` responde 200 com `{"twoFactorRequired": true, "challengeToken", "expiresAt"}` em vez de tokens. O desafio vale 5 minutos, aceita 5 tentativas, é guardado apenas como SHA-256 e consumido uma única vez em `/login/two-factor`. Cada passo de tempo aceito é gravado (`totpLastCounter`), então um código não pode ser reutilizado. Troca de senha entre o login e o segundo fator invalida o desafio. Código errado em `enable`/`disable` retorna 422 `INVALID_TWO_FACTOR_CODE`; estado incompatível retorna 409 `TWO_FACTOR_CONFLICT`.
+
 ## Persistência e compatibilidade
 
-O Auth é o único dono do banco `binitech_auth`: `identities`, `refresh_tokens`, `revoked_tokens` e controle da migração. Não acessa MongoDB ou Redis do PDV. Os IDs legados são preservados como texto, inclusive quando têm formato ObjectId. O PDV mantém seus vínculos e permissões locais; `role` não é uma autorização global e fica nulo para identidades migradas.
+O Auth é o único dono do banco `binitech_auth`: `identities`, `refresh_tokens`, `revoked_tokens`, `two_factor_challenges` e controle da migração. Não acessa MongoDB ou Redis do PDV. Os IDs legados são preservados como texto, inclusive quando têm formato ObjectId. O PDV mantém seus vínculos e permissões locais; `role` não é uma autorização global e fica nulo para identidades migradas.
 
 Cada refresh é consumido atomicamente uma única vez. O logout invalida o access token apresentado e remove refresh tokens do usuário/tenant; outros access tokens continuam até expirar. Troca/redefinição de senha incrementa a versão de sessão na mesma atualização atômica do hash. O PDV consulta `/session` a cada requisição autenticada e verifica seu vínculo local; indisponibilidade do Auth falha de forma fechada.
 
@@ -75,6 +85,11 @@ O endpoint interno de recuperação retorna destinatário/token apenas ao adapta
 | `SECURITY_PEPPER` | Mesmo pepper dos hashes existentes |
 | `JWT_ACCESS_EXPIRATION` | Validade em ms; `900000` |
 | `JWT_REFRESH_EXPIRATION` | Validade em ms; `86400000` |
+| `AUTH_TOTP_ALGORITHM` | `SHA512` ou `SHA256`; `SHA512` |
+| `AUTH_TOTP_DIGITS` | 6 a 8; `6` |
+| `AUTH_TOTP_PERIOD` | Passo em segundos; `30` |
+| `AUTH_TOTP_WINDOW` | Passos aceitos antes/depois do atual (0 a 5); `1` |
+| `AUTH_TOTP_ISSUER` | Emissor exibido no autenticador; `BiniTech` |
 | `AUTH_CORS_ALLOWED_ORIGINS` | Origens separadas por vírgula; `http://localhost:4200` |
 | `PORT` | `8081` |
 ```sh

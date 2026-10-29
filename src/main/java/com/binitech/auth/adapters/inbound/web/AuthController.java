@@ -2,11 +2,15 @@ package com.binitech.auth.adapters.inbound.web;
 
 import com.binitech.auth.application.ports.inbound.AuthenticationUseCase;
 import com.binitech.auth.domain.AuthResult;
+import com.binitech.auth.domain.LoginOutcome;
 import com.binitech.auth.domain.SessionIdentity;
+import com.binitech.auth.domain.TwoFactorChallenge;
 import com.binitech.auth.domain.exception.InvalidCredentialsException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -29,20 +33,44 @@ public class AuthController {
   }
 
   @PostMapping("/login")
-  public AuthResult login(@Valid @RequestBody LoginRequest request) {
+  public Object login(@Valid @RequestBody LoginRequest request) {
     String username = mask(request.username());
     String tenantId = mask(request.tenantId());
     log.info("Login recebido: username={} tenantId={}", username, tenantId);
     try {
-      AuthResult result = login.login(request.username(), request.password(), request.tenantId());
-      log.info(
-          "Login concluído: username={} tenantId={} role={}",
-          username,
-          mask(result.tenantId()),
-          result.role());
-      return result;
+      LoginOutcome outcome =
+          login.login(request.username(), request.password(), request.tenantId());
+      return switch (outcome) {
+        case AuthResult result -> {
+          log.info(
+              "Login concluído: username={} tenantId={} role={}",
+              username,
+              mask(result.tenantId()),
+              result.role());
+          yield result;
+        }
+        case TwoFactorChallenge challenge -> {
+          log.info("Login aguardando segundo fator: username={} tenantId={}", username, tenantId);
+          yield new TwoFactorRequired(true, challenge.challengeToken(), challenge.expiresAt());
+        }
+      };
     } catch (InvalidCredentialsException exception) {
       log.warn("Login recusado: username={} tenantId={}", username, tenantId);
+      throw exception;
+    }
+  }
+
+  @PostMapping("/login/two-factor")
+  public AuthResult completeTwoFactor(@Valid @RequestBody TwoFactorLoginRequest request) {
+    try {
+      AuthResult result = login.completeTwoFactorLogin(request.challengeToken(), request.code());
+      log.info(
+          "Segundo fator concluído: username={} tenantId={}",
+          mask(result.username()),
+          mask(result.tenantId()));
+      return result;
+    } catch (InvalidCredentialsException exception) {
+      log.warn("Segundo fator recusado");
       throw exception;
     }
   }
@@ -55,7 +83,7 @@ public class AuthController {
   @GetMapping("/session")
   public SessionIdentity session(
       @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
-    return login.session(bearer(authorization));
+    return login.session(BearerToken.extract(authorization));
   }
 
   @PostMapping("/logout")
@@ -63,7 +91,7 @@ public class AuthController {
       @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
     log.info("Logout recebido");
     try {
-      login.logout(bearer(authorization));
+      login.logout(BearerToken.extract(authorization));
       log.info("Logout concluído");
       return ResponseEntity.noContent().build();
     } catch (InvalidCredentialsException exception) {
@@ -72,21 +100,19 @@ public class AuthController {
     }
   }
 
-  private String bearer(String authorization) {
-    if (authorization == null
-        || !authorization.startsWith("Bearer ")
-        || authorization.substring(7).isBlank()) {
-      throw new InvalidCredentialsException();
-    }
-    return authorization.substring(7);
-  }
-
   public record LoginRequest(
       @NotBlank @Size(max = 200) String username,
       @NotBlank @Size(max = 1024) String password,
       @Size(max = 200) String tenantId) {}
 
   public record RefreshRequest(@NotBlank @Size(max = 200) String refreshToken) {}
+
+  public record TwoFactorLoginRequest(
+      @NotBlank @Size(max = 200) String challengeToken,
+      @NotBlank @Pattern(regexp = "\\d{6,8}") String code) {}
+
+  public record TwoFactorRequired(
+      boolean twoFactorRequired, String challengeToken, Instant expiresAt) {}
 
   private String mask(String value) {
     if (value == null || value.isBlank()) {

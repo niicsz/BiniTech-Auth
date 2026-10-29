@@ -25,5 +25,9 @@ public class MongoIndexes implements CommandLineRunner {
         .getCollection("revoked_tokens")
         .createIndex(
             new Document("expiresAt", 1), new IndexOptions().expireAfter(0L, TimeUnit.SECONDS));
+    mongo
+        .getCollection("two_factor_challenges")
+        .createIndex(
+            new Document("expiresAt", 1), new IndexOptions().expireAfter(0L, TimeUnit.SECONDS));
   }
 }

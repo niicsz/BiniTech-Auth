@@ -1,8 +1,10 @@
 package com.binitech.auth.config;
 
 import com.binitech.auth.application.ports.inbound.AuthenticationUseCase;
+import com.binitech.auth.application.ports.inbound.TwoFactorManagement;
 import com.binitech.auth.application.ports.outbound.*;
 import com.binitech.auth.application.usecases.LoginUseCase;
+import com.binitech.auth.application.usecases.TwoFactorUseCase;
 import java.time.Clock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -32,9 +34,30 @@ public class BeanConfiguration {
       SessionRevocationPort revocations,
       AccessTokenPort tokens,
       PasswordHashPort passwords,
+      TwoFactorRepositoryPort twoFactor,
+      TwoFactorChallengeRepositoryPort challenges,
+      TotpPort totp,
       @Value("${jwt.refresh-expiration}") long refreshExpiration,
       Clock clock) {
     return new LoginUseCase(
-        identities, sessions, tokens, passwords, refreshExpiration, revocations, clock);
+        identities,
+        sessions,
+        tokens,
+        passwords,
+        refreshExpiration,
+        revocations,
+        twoFactor,
+        challenges,
+        totp,
+        clock);
+  }
+
+  @Bean
+  public TwoFactorManagement twoFactorManagement(
+      AuthenticationUseCase authentication,
+      TwoFactorRepositoryPort twoFactor,
+      TotpPort totp,
+      Clock clock) {
+    return new TwoFactorUseCase(authentication, twoFactor, totp, clock);
   }
 }
