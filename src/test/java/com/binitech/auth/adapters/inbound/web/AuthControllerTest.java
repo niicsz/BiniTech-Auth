@@ -161,7 +161,11 @@ class AuthControllerTest {
   @Test
   void twoFactorEnrollment_requiresBearerAndValidatesCode() throws Exception {
     mvc.perform(post("/api/auth/two-factor/setup")).andExpect(status().isUnauthorized());
+    mvc.perform(get("/api/auth/two-factor")).andExpect(status().isUnauthorized());
     String bearer = "Bearer " + tokens.issue(user, 0);
+    mvc.perform(get("/api/auth/two-factor").header("Authorization", bearer))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.enabled").value(false));
     when(totp.provision("admin"))
         .thenReturn(new TwoFactorSetup("c2VjcmV0", "otpauth://totp/x", "SHA512", 6, 30));
     when(twoFactor.savePending("user1", "c2VjcmV0")).thenReturn(true);

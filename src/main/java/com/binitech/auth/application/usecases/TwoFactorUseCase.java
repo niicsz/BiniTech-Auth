@@ -7,6 +7,7 @@ import com.binitech.auth.application.ports.outbound.TwoFactorRepositoryPort;
 import com.binitech.auth.domain.SessionIdentity;
 import com.binitech.auth.domain.TwoFactorEnrollment;
 import com.binitech.auth.domain.TwoFactorSetup;
+import com.binitech.auth.domain.TwoFactorStatus;
 import com.binitech.auth.domain.exception.InvalidTwoFactorCodeException;
 import com.binitech.auth.domain.exception.TwoFactorConflictException;
 import java.time.Clock;
@@ -27,6 +28,16 @@ public class TwoFactorUseCase implements TwoFactorManagement {
     this.twoFactor = twoFactor;
     this.totp = totp;
     this.clock = clock;
+  }
+
+  public TwoFactorStatus status(String accessToken) {
+    SessionIdentity identity = authentication.session(accessToken);
+    Instant now = clock.instant();
+    return twoFactor
+        .find(identity.userId())
+        .filter(TwoFactorEnrollment::enabled)
+        .map(e -> new TwoFactorStatus(true, e.lockedAt(now) ? e.lockedUntil() : null))
+        .orElse(new TwoFactorStatus(false, null));
   }
 
   public TwoFactorSetup setup(String accessToken) {
