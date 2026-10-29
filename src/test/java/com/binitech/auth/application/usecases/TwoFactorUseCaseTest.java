@@ -9,6 +9,7 @@ import com.binitech.auth.application.ports.outbound.*;
 import com.binitech.auth.domain.*;
 import com.binitech.auth.domain.exception.InvalidTwoFactorCodeException;
 import com.binitech.auth.domain.exception.TwoFactorConflictException;
+import com.binitech.auth.domain.exception.TwoFactorLockedException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -51,7 +52,7 @@ class TwoFactorUseCaseTest {
   @Test
   void enableActivatesPendingSecretWithVerifiedCounter() {
     when(twoFactor.find("user1"))
-        .thenReturn(Optional.of(new TwoFactorEnrollment(null, "pending", -1L)));
+        .thenReturn(Optional.of(new TwoFactorEnrollment(null, "pending", -1L, null)));
     when(totp.verify("pending", "123456", now)).thenReturn(OptionalLong.of(42L));
     when(twoFactor.activate("user1", "pending", 42L)).thenReturn(true);
 
@@ -63,23 +64,46 @@ class TwoFactorUseCaseTest {
   @Test
   void enableRejectsWrongCodeAndMissingSetup() {
     when(twoFactor.find("user1"))
-        .thenReturn(Optional.of(new TwoFactorEnrollment(null, "pending", -1L)));
+        .thenReturn(Optional.of(new TwoFactorEnrollment(null, "pending", -1L, null)));
     when(totp.verify("pending", "000000", now)).thenReturn(OptionalLong.empty());
     assertThrows(InvalidTwoFactorCodeException.class, () -> useCase.enable("access", "000000"));
 
-    when(twoFactor.find("user1")).thenReturn(Optional.of(new TwoFactorEnrollment(null, null, -1L)));
+    when(twoFactor.find("user1"))
+        .thenReturn(Optional.of(new TwoFactorEnrollment(null, null, -1L, null)));
     assertThrows(TwoFactorConflictException.class, () -> useCase.enable("access", "000000"));
     verify(twoFactor, never()).activate(anyString(), anyString(), anyLong());
   }
 
   @Test
+  void disableIsBlockedWhileLockedAndThirdFailureLocks() {
+    when(twoFactor.find("user1"))
+        .thenReturn(Optional.of(new TwoFactorEnrollment("active", null, 42L, now.plusSeconds(60))));
+    assertThrows(TwoFactorLockedException.class, () -> useCase.disable("access", "123456"));
+    verifyNoInteractions(totp);
+
+    when(twoFactor.find("user1"))
+        .thenReturn(Optional.of(new TwoFactorEnrollment("active", null, 42L, null)));
+    when(totp.verify("active", "000000", now)).thenReturn(OptionalLong.empty());
+    when(twoFactor.registerFailure("user1", 3, now.plusSeconds(3600)))
+        .thenReturn(new TwoFactorFailure(0, now.plusSeconds(3600)));
+    var locked =
+        assertThrows(TwoFactorLockedException.class, () -> useCase.disable("access", "000000"));
+    assertEquals(now.plusSeconds(3600), locked.lockedUntil());
+  }
+
+  @Test
   void disableRequiresFreshCodeForActiveSecret() {
     when(twoFactor.find("user1"))
-        .thenReturn(Optional.of(new TwoFactorEnrollment("active", null, 42L)));
+        .thenReturn(Optional.of(new TwoFactorEnrollment("active", null, 42L, null)));
     when(totp.verify("active", "123456", now)).thenReturn(OptionalLong.of(42L));
     when(twoFactor.disable("user1", "active", 42L)).thenReturn(false);
+    when(twoFactor.registerFailure("user1", 3, now.plusSeconds(3600)))
+        .thenReturn(new TwoFactorFailure(1, null));
 
-    assertThrows(InvalidTwoFactorCodeException.class, () -> useCase.disable("access", "123456"));
+    var wrong =
+        assertThrows(
+            InvalidTwoFactorCodeException.class, () -> useCase.disable("access", "123456"));
+    assertEquals(1, wrong.remainingAttempts());
 
     when(totp.verify("active", "654321", now)).thenReturn(OptionalLong.of(43L));
     when(twoFactor.disable("user1", "active", 43L)).thenReturn(true);

@@ -71,7 +71,9 @@ public class LoginUseCase implements AuthenticationUseCase {
       throw new InvalidCredentialsException();
     }
     long version = revocations.sessionVersion(match.id());
-    if (twoFactor.find(match.id()).filter(TwoFactorEnrollment::enabled).isPresent()) {
+    var enrollment = twoFactor.find(match.id()).filter(TwoFactorEnrollment::enabled);
+    if (enrollment.isPresent()) {
+      TwoFactorLockout.ensureUnlocked(enrollment.get(), clock.instant());
       return challenge(match, version);
     }
     return issueSession(match, version);
@@ -96,9 +98,12 @@ public class LoginUseCase implements AuthenticationUseCase {
             .find(identity.id())
             .filter(TwoFactorEnrollment::enabled)
             .orElseThrow(InvalidCredentialsException::new);
-    long counter =
-        totp.verify(enrollment.secret(), code, now).orElseThrow(InvalidCredentialsException::new);
-    if (!twoFactor.markUsed(identity.id(), counter) || !challenges.consume(pending.id())) {
+    TwoFactorLockout.ensureUnlocked(enrollment, now);
+    var counter = totp.verify(enrollment.secret(), code, now);
+    if (counter.isEmpty() || !twoFactor.markUsed(identity.id(), counter.getAsLong())) {
+      throw TwoFactorLockout.failure(twoFactor, identity.id(), now);
+    }
+    if (!challenges.consume(pending.id())) {
       throw new InvalidCredentialsException();
     }
     return issueSession(identity, version);
