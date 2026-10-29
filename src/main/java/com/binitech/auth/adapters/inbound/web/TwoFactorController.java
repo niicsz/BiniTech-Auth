@@ -31,9 +31,10 @@ public class TwoFactorController {
   }
 
   @PostMapping("/setup")
-  public TwoFactorSetup setup(
+  public SetupResponse setup(
       @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
-    return twoFactor.setup(BearerToken.extract(authorization));
+    TwoFactorSetup setup = twoFactor.setup(BearerToken.extract(authorization));
+    return new SetupResponse(setup.otpauthUri(), setup.algorithm(), setup.digits(), setup.period());
   }
 
   @PostMapping("/enable")
@@ -51,6 +52,8 @@ public class TwoFactorController {
     twoFactor.disable(BearerToken.extract(authorization), request.code());
     return ResponseEntity.noContent().build();
   }
+
+  public record SetupResponse(String otpauthUri, String algorithm, int digits, long period) {}
 
   public record CodeRequest(@NotBlank @Pattern(regexp = "\\d{6,8}") String code) {}
 }

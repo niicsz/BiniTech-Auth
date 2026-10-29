@@ -171,7 +171,8 @@ class AuthControllerTest {
     when(twoFactor.savePending("user1", "c2VjcmV0")).thenReturn(true);
     mvc.perform(post("/api/auth/two-factor/setup").header("Authorization", bearer))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.secret").value("c2VjcmV0"))
+        .andExpect(jsonPath("$.secret").doesNotExist())
+        .andExpect(jsonPath("$.otpauthUri").value("otpauth://totp/x"))
         .andExpect(jsonPath("$.algorithm").value("SHA512"));
 
     when(twoFactor.find("user1"))
