@@ -9,9 +9,13 @@ import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Base64;
+import java.util.Optional;
 import java.util.OptionalLong;
+import javax.crypto.Cipher;
 import javax.crypto.Mac;
+import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -22,6 +26,11 @@ public class HmacTotpAdapter implements TotpPort {
     1, 10, 100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000, 100_000_000
   };
   private static final String BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  private static final String SEALED_PREFIX = "v1:";
+  private static final byte[] SEAL_CONTEXT =
+      "binitech-auth:totp-secret:v1".getBytes(StandardCharsets.US_ASCII);
+  private static final int IV_LENGTH = 12;
+  private static final int TAG_BITS = 128;
 
   private final SecureRandom random = new SecureRandom();
   private final TotpAlgorithm algorithm;
@@ -29,13 +38,15 @@ public class HmacTotpAdapter implements TotpPort {
   private final long period;
   private final int window;
   private final String issuer;
+  private final SecretKeySpec sealKey;
 
   public HmacTotpAdapter(
-      @Value("${totp.algorithm:SHA512}") String algorithm,
+      @Value("${totp.algorithm:SHA1}") String algorithm,
       @Value("${totp.digits:6}") int digits,
       @Value("${totp.period:30}") long period,
       @Value("${totp.window:1}") int window,
-      @Value("${totp.issuer:BiniTech}") String issuer) {
+      @Value("${totp.issuer:BiniTech}") String issuer,
+      @Value("${security.pepper}") String pepper) {
     if (digits < 6 || digits > 8) {
       throw new IllegalArgumentException("AUTH_TOTP_DIGITS deve estar entre 6 e 8.");
     }
@@ -48,11 +59,17 @@ public class HmacTotpAdapter implements TotpPort {
     if (issuer == null || issuer.isBlank()) {
       throw new IllegalArgumentException("AUTH_TOTP_ISSUER é obrigatório.");
     }
+    if (pepper == null || pepper.isBlank()) {
+      throw new IllegalArgumentException("SECURITY_PEPPER é obrigatório.");
+    }
     this.algorithm = TotpAlgorithm.parse(algorithm);
     this.digits = digits;
     this.period = period;
     this.window = window;
     this.issuer = issuer;
+    this.sealKey =
+        new SecretKeySpec(
+            mac("HmacSHA256", pepper.getBytes(StandardCharsets.UTF_8), SEAL_CONTEXT), "AES");
   }
 
   @Override
@@ -60,11 +77,7 @@ public class HmacTotpAdapter implements TotpPort {
     byte[] key = new byte[algorithm.keyLength()];
     random.nextBytes(key);
     return new TwoFactorSetup(
-        Base64.getEncoder().encodeToString(key),
-        uri(key, accountName),
-        algorithm.name(),
-        digits,
-        period);
+        seal(algorithm, key), uri(key, accountName), algorithm.name(), digits, period);
   }
 
   @Override
@@ -72,26 +85,75 @@ public class HmacTotpAdapter implements TotpPort {
     if (secret == null || code == null || code.length() != digits) {
       return OptionalLong.empty();
     }
-    byte[] key;
-    try {
-      key = Base64.getDecoder().decode(secret);
-    } catch (IllegalArgumentException exception) {
+    Optional<Sealed> sealed = unseal(secret);
+    if (sealed.isEmpty()) {
       return OptionalLong.empty();
     }
+    TotpAlgorithm keyAlgorithm = sealed.get().algorithm();
+    byte[] key = sealed.get().key();
     byte[] supplied = code.getBytes(StandardCharsets.US_ASCII);
     long current = Math.floorDiv(now.getEpochSecond(), period);
     for (long counter = current - window; counter <= current + window; counter++) {
       if (counter >= 0
           && MessageDigest.isEqual(
-              generate(key, counter).getBytes(StandardCharsets.US_ASCII), supplied)) {
+              generate(keyAlgorithm, key, counter).getBytes(StandardCharsets.US_ASCII), supplied)) {
         return OptionalLong.of(counter);
       }
     }
     return OptionalLong.empty();
   }
 
-  private String generate(byte[] key, long counter) {
-    byte[] hash = hmac(key, ByteBuffer.allocate(Long.BYTES).putLong(counter).array());
+  String seal(TotpAlgorithm keyAlgorithm, byte[] key) {
+    byte[] plain =
+        (keyAlgorithm.name() + ":" + Base64.getEncoder().encodeToString(key))
+            .getBytes(StandardCharsets.US_ASCII);
+    byte[] iv = new byte[IV_LENGTH];
+    random.nextBytes(iv);
+    byte[] encrypted = cipher(Cipher.ENCRYPT_MODE, iv, plain);
+    byte[] out = ByteBuffer.allocate(iv.length + encrypted.length).put(iv).put(encrypted).array();
+    return SEALED_PREFIX + Base64.getEncoder().encodeToString(out);
+  }
+
+  private Optional<Sealed> unseal(String secret) {
+    try {
+      if (!secret.startsWith(SEALED_PREFIX)) {
+        return Optional.of(new Sealed(algorithm, Base64.getDecoder().decode(secret)));
+      }
+      byte[] data = Base64.getDecoder().decode(secret.substring(SEALED_PREFIX.length()));
+      if (data.length <= IV_LENGTH) {
+        return Optional.empty();
+      }
+      byte[] iv = Arrays.copyOf(data, IV_LENGTH);
+      byte[] encrypted = Arrays.copyOfRange(data, IV_LENGTH, data.length);
+      String plain =
+          new String(cipher(Cipher.DECRYPT_MODE, iv, encrypted), StandardCharsets.US_ASCII);
+      int separator = plain.indexOf(':');
+      if (separator < 0) {
+        return Optional.empty();
+      }
+      return Optional.of(
+          new Sealed(
+              TotpAlgorithm.parse(plain.substring(0, separator)),
+              Base64.getDecoder().decode(plain.substring(separator + 1))));
+    } catch (IllegalArgumentException | IllegalStateException exception) {
+      return Optional.empty();
+    }
+  }
+
+  private byte[] cipher(int mode, byte[] iv, byte[] input) {
+    try {
+      Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+      cipher.init(mode, sealKey, new GCMParameterSpec(TAG_BITS, iv));
+      cipher.updateAAD(SEAL_CONTEXT);
+      return cipher.doFinal(input);
+    } catch (GeneralSecurityException exception) {
+      throw new IllegalStateException(exception);
+    }
+  }
+
+  private String generate(TotpAlgorithm keyAlgorithm, byte[] key, long counter) {
+    byte[] hash =
+        mac(keyAlgorithm.mac(), key, ByteBuffer.allocate(Long.BYTES).putLong(counter).array());
     int offset = hash[hash.length - 1] & 0x0f;
     int binary =
         ((hash[offset] & 0x7f) << 24)
@@ -102,10 +164,10 @@ public class HmacTotpAdapter implements TotpPort {
     return "0".repeat(digits - otp.length()) + otp;
   }
 
-  private byte[] hmac(byte[] key, byte[] message) {
+  private static byte[] mac(String name, byte[] key, byte[] message) {
     try {
-      Mac mac = Mac.getInstance(algorithm.mac());
-      mac.init(new SecretKeySpec(key, algorithm.mac()));
+      Mac mac = Mac.getInstance(name);
+      mac.init(new SecretKeySpec(key, name));
       return mac.doFinal(message);
     } catch (GeneralSecurityException exception) {
       throw new IllegalStateException(exception);
@@ -130,6 +192,8 @@ public class HmacTotpAdapter implements TotpPort {
   private static String encode(String value) {
     return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
   }
+
+  private record Sealed(TotpAlgorithm algorithm, byte[] key) {}
 
   private static String base32(byte[] data) {
     StringBuilder out = new StringBuilder();

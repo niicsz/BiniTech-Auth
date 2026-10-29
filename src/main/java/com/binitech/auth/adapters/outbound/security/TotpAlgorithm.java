@@ -3,6 +3,7 @@ package com.binitech.auth.adapters.outbound.security;
 import java.util.Locale;
 
 public enum TotpAlgorithm {
+  SHA1("HmacSHA1", 20),
   SHA256("HmacSHA256", 32),
   SHA512("HmacSHA512", 64);
 
@@ -31,6 +32,6 @@ public enum TotpAlgorithm {
         }
       }
     }
-    throw new IllegalArgumentException("AUTH_TOTP_ALGORITHM deve ser SHA256 ou SHA512.");
+    throw new IllegalArgumentException("AUTH_TOTP_ALGORITHM deve ser SHA1, SHA256 ou SHA512.");
   }
 }

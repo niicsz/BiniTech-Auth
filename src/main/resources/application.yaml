@@ -22,7 +22,7 @@ jwt:
   access-expiration: ${JWT_ACCESS_EXPIRATION:900000}
   refresh-expiration: ${JWT_REFRESH_EXPIRATION:86400000}
 totp:
-  algorithm: ${AUTH_TOTP_ALGORITHM:SHA512}
+  algorithm: ${AUTH_TOTP_ALGORITHM:SHA1}
   digits: ${AUTH_TOTP_DIGITS:6}
   period: ${AUTH_TOTP_PERIOD:30}
   window: ${AUTH_TOTP_WINDOW:1}

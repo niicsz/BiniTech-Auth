@@ -56,7 +56,7 @@ Aplicações podem consultar `/api/auth/session` pelo backend, sem receber segre
 
 ## Segundo fator (TOTP)
 
-TOTP conforme RFC 6238 com HMAC-SHA512 (padrão) ou HMAC-SHA256. A chave é gerada com `SecureRandom` no tamanho da saída do hash (64 bytes para SHA512, 32 para SHA256) e trafega/é armazenada em base64. O código é calculado com o contador `floor(epochSeconds / período)` em 8 bytes big-endian, HMAC com a chave e truncamento dinâmico (offset nos 4 bits finais do hash, 31 bits, módulo `10^dígitos`). A `otpauthUri` leva a mesma chave em base32 para leitura por QR code; nem todo aplicativo autenticador respeita `algorithm=SHA512`.
+TOTP conforme RFC 6238 com HMAC-SHA1 (padrão), HMAC-SHA256 ou HMAC-SHA512. A chave é gerada com `SecureRandom` no tamanho da saída do hash (20, 32 ou 64 bytes) e armazenada cifrada com AES-256-GCM, com chave derivada do `SECURITY_PEPPER` via HMAC-SHA256; um vazamento do banco não expõe as chaves 2FA. O algoritmo fica gravado junto com a chave de cada usuário, então trocar `AUTH_TOTP_ALGORITHM` só afeta novas ativações. O código é calculado com o contador `floor(epochSeconds / período)` em 8 bytes big-endian, HMAC com a chave e truncamento dinâmico (offset nos 4 bits finais do hash, 31 bits, módulo `10^dígitos`). A `otpauthUri` leva a chave em base32 para leitura por QR code. Google Authenticator, Microsoft Authenticator e Authy ignoram `algorithm=SHA256/SHA512` e calculam com SHA1, por isso o padrão é SHA1.
 
 Ativação: `setup` gera uma chave pendente; `enable` confirma com um código válido. Com 2FA ativo, `login` responde 200 com `{"twoFactorRequired": true, "challengeToken", "expiresAt"}` em vez de tokens. O desafio vale 5 minutos, aceita 5 tentativas, é guardado apenas como SHA-256 e consumido uma única vez em `/login/two-factor`. Cada passo de tempo aceito é gravado (`totpLastCounter`), então um código não pode ser reutilizado. Troca de senha entre o login e o segundo fator invalida o desafio. Código errado em `/login/two-factor` ou `disable` retorna 422 `INVALID_TWO_FACTOR_CODE` com `remainingAttempts`. Na terceira falha seguida o usuário fica bloqueado por 1 hora: a resposta é 423 `TWO_FACTOR_LOCKED` com `lockedUntil` e a mensagem pronta para a tela, e enquanto durar o bloqueio o login com senha correta, a conclusão do segundo fator e o `disable` também retornam 423. Um código aceito zera o contador. Estado incompatível retorna 409 `TWO_FACTOR_CONFLICT`.
 
@@ -83,10 +83,10 @@ O endpoint interno de recuperação retorna destinatário/token apenas ao adapta
 | `AUTH_SERVICE_KEY` | Credencial interna, pelo menos 32 caracteres |
 | `AUTH_APPLICATION_ID` | Namespace administrativo; `pdv` |
 | `JWT_SECRET` | Chave exclusiva do Auth, pelo menos 32 bytes; não entregue ao PDV |
-| `SECURITY_PEPPER` | Mesmo pepper dos hashes existentes |
+| `SECURITY_PEPPER` | Mesmo pepper dos hashes existentes; também deriva a chave que cifra os segredos TOTP |
 | `JWT_ACCESS_EXPIRATION` | Validade em ms; `900000` |
 | `JWT_REFRESH_EXPIRATION` | Validade em ms; `86400000` |
-| `AUTH_TOTP_ALGORITHM` | `SHA512` ou `SHA256`; `SHA512` |
+| `AUTH_TOTP_ALGORITHM` | `SHA1`, `SHA256` ou `SHA512`; `SHA1` |
 | `AUTH_TOTP_DIGITS` | 6 a 8; `6` |
 | `AUTH_TOTP_PERIOD` | Passo em segundos; `30` |
 | `AUTH_TOTP_WINDOW` | Passos aceitos antes/depois do atual (0 a 5); `1` |
