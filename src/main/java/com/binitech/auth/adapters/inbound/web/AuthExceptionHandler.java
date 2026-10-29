@@ -1,6 +1,8 @@
 package com.binitech.auth.adapters.inbound.web;
 
 import com.binitech.auth.domain.exception.InvalidCredentialsException;
+import com.binitech.auth.domain.exception.InvalidTwoFactorCodeException;
+import com.binitech.auth.domain.exception.TwoFactorConflictException;
 import java.time.Instant;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
@@ -16,6 +18,22 @@ public class AuthExceptionHandler {
   ResponseEntity<ErrorResponse> invalidCredentials() {
     return error(
         HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "Credenciais ou sessão inválidas.");
+  }
+
+  @ExceptionHandler(InvalidTwoFactorCodeException.class)
+  ResponseEntity<ErrorResponse> invalidTwoFactorCode() {
+    return error(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        "INVALID_TWO_FACTOR_CODE",
+        "Código de verificação inválido.");
+  }
+
+  @ExceptionHandler(TwoFactorConflictException.class)
+  ResponseEntity<ErrorResponse> twoFactorConflict() {
+    return error(
+        HttpStatus.CONFLICT,
+        "TWO_FACTOR_CONFLICT",
+        "Estado do segundo fator não permite esta operação.");
   }
 
   @ExceptionHandler({

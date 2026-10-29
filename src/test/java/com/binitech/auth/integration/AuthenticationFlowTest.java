@@ -36,7 +36,16 @@ class AuthenticationFlowTest {
   void setUp() {
     login =
         new LoginUseCase(
-            identities, sessions, tokens, passwords, 86400000, revocations, Clock.systemUTC());
+            identities,
+            sessions,
+            tokens,
+            passwords,
+            86400000,
+            revocations,
+            mock(TwoFactorRepositoryPort.class),
+            mock(TwoFactorChallengeRepositoryPort.class),
+            mock(TotpPort.class),
+            Clock.systemUTC());
     user =
         new Identity(
             "user1", "admin", passwords.encode("password"), "TENANT_ADMIN", "tenant1", true);
@@ -55,9 +64,13 @@ class AuthenticationFlowTest {
             invocation -> Optional.ofNullable(refreshSessions.remove(invocation.getArgument(0))));
   }
 
+  private AuthResult authenticate(String username, String password, String tenantId) {
+    return (AuthResult) login.login(username, password, tenantId);
+  }
+
   @Test
   void loginAndSession_returnCompatibleClaimsWithoutPassword() {
-    var result = login.login("admin", "password", null);
+    var result = authenticate("admin", "password", null);
     var claims =
         io.jsonwebtoken.Jwts.parser()
             .verifyWith(
@@ -76,8 +89,8 @@ class AuthenticationFlowTest {
 
   @Test
   void loginForAnotherApplication_preservesExistingRefreshSession() {
-    var first = login.login("admin", "password", null);
-    var second = login.login("admin", "password", null);
+    var first = authenticate("admin", "password", null);
+    var second = authenticate("admin", "password", null);
     assertNotEquals(first.accessToken(), second.accessToken());
     assertNotNull(login.refresh(first.refreshToken()));
     assertNotNull(login.refresh(second.refreshToken()));
@@ -86,7 +99,7 @@ class AuthenticationFlowTest {
 
   @Test
   void refresh_consumesOldTokenAndIssuesDistinctTokens() {
-    var first = login.login("admin", "password", null);
+    var first = authenticate("admin", "password", null);
     var second = login.refresh(first.refreshToken());
     assertNotEquals(first.refreshToken(), second.refreshToken());
     assertNotEquals(first.accessToken(), second.accessToken());
@@ -95,7 +108,7 @@ class AuthenticationFlowTest {
 
   @Test
   void concurrentRefresh_onlyOneRequestSucceeds() throws Exception {
-    var first = login.login("admin", "password", null);
+    var first = authenticate("admin", "password", null);
     CountDownLatch start = new CountDownLatch(1);
     Callable<Boolean> refresh =
         () -> {
@@ -118,8 +131,9 @@ class AuthenticationFlowTest {
   @Test
   void unknownUserWrongPasswordAndInactiveUser_areRejected() {
     when(identities.findCandidates("missing", null)).thenReturn(List.of());
-    assertThrows(InvalidCredentialsException.class, () -> login.login("missing", "password", null));
-    assertThrows(InvalidCredentialsException.class, () -> login.login("admin", "wrong", null));
+    assertThrows(
+        InvalidCredentialsException.class, () -> authenticate("missing", "password", null));
+    assertThrows(InvalidCredentialsException.class, () -> authenticate("admin", "wrong", null));
     when(identities.findCandidates("admin", null))
         .thenReturn(
             List.of(
@@ -130,7 +144,7 @@ class AuthenticationFlowTest {
                     user.role(),
                     user.tenantId(),
                     false)));
-    assertThrows(InvalidCredentialsException.class, () -> login.login("admin", "password", null));
+    assertThrows(InvalidCredentialsException.class, () -> authenticate("admin", "password", null));
     assertTrue(refreshSessions.isEmpty());
   }
 
@@ -138,9 +152,9 @@ class AuthenticationFlowTest {
   void ambiguousLogin_requiresTenantSelection() {
     var other = new Identity("user2", "admin", user.password(), "OPERATOR", "tenant2", true);
     when(identities.findCandidates("admin", null)).thenReturn(List.of(user, other));
-    assertThrows(InvalidCredentialsException.class, () -> login.login("admin", "password", null));
+    assertThrows(InvalidCredentialsException.class, () -> authenticate("admin", "password", null));
     when(identities.findCandidates("admin", "tenant2")).thenReturn(List.of(other));
-    assertEquals("tenant2", login.login("admin", "password", "tenant2").tenantId());
+    assertEquals("tenant2", authenticate("admin", "password", "tenant2").tenantId());
   }
 
   @Test
@@ -154,7 +168,7 @@ class AuthenticationFlowTest {
 
   @Test
   void passwordChangeRevocation_rejectsAccessAndRefresh() {
-    var first = login.login("admin", "password", null);
+    var first = authenticate("admin", "password", null);
     when(revocations.sessionVersion(user.id())).thenReturn(1L);
     assertThrows(InvalidCredentialsException.class, () -> login.session(first.accessToken()));
     assertThrows(InvalidCredentialsException.class, () -> login.refresh(first.refreshToken()));
@@ -162,7 +176,7 @@ class AuthenticationFlowTest {
 
   @Test
   void inactiveUser_cannotUseExistingAccessOrRefresh() {
-    var first = login.login("admin", "password", null);
+    var first = authenticate("admin", "password", null);
     when(identities.findById(user.id()))
         .thenReturn(
             Optional.of(
@@ -179,7 +193,7 @@ class AuthenticationFlowTest {
 
   @Test
   void session_readsCurrentRoleAndRejectsDeletedUsers() {
-    var first = login.login("admin", "password", null);
+    var first = authenticate("admin", "password", null);
     when(identities.findById(user.id()))
         .thenReturn(
             Optional.of(
@@ -197,7 +211,7 @@ class AuthenticationFlowTest {
 
   @Test
   void logout_blacklistsAccessAndDeletesRefreshSessions() {
-    var first = login.login("admin", "password", null);
+    var first = authenticate("admin", "password", null);
     login.logout(first.accessToken());
     verify(revocations)
         .blacklist(eq(first.accessToken()), longThat(ttl -> ttl > 0 && ttl <= 60000));

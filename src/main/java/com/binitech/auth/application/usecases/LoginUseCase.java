@@ -6,11 +6,14 @@ import com.binitech.auth.domain.*;
 import com.binitech.auth.domain.exception.InvalidCredentialsException;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
 public class LoginUseCase implements AuthenticationUseCase {
+  private static final Duration TWO_FACTOR_CHALLENGE_TTL = Duration.ofMinutes(5);
+  private static final int TWO_FACTOR_MAX_ATTEMPTS = 5;
   private final IdentityRepositoryPort identities;
   private final RefreshSessionRepositoryPort sessions;
   private final AccessTokenPort tokens;
@@ -18,6 +21,9 @@ public class LoginUseCase implements AuthenticationUseCase {
   private final long refreshExpiration;
   private final Clock clock;
   private final SessionRevocationPort revocations;
+  private final TwoFactorRepositoryPort twoFactor;
+  private final TwoFactorChallengeRepositoryPort challenges;
+  private final TotpPort totp;
   private final String dummyHash;
 
   public LoginUseCase(
@@ -27,6 +33,9 @@ public class LoginUseCase implements AuthenticationUseCase {
       PasswordHashPort passwords,
       long refreshExpiration,
       SessionRevocationPort revocations,
+      TwoFactorRepositoryPort twoFactor,
+      TwoFactorChallengeRepositoryPort challenges,
+      TotpPort totp,
       Clock clock) {
     if (refreshExpiration <= 0) {
       throw new IllegalArgumentException("JWT_REFRESH_EXPIRATION deve ser positivo.");
@@ -38,10 +47,13 @@ public class LoginUseCase implements AuthenticationUseCase {
     this.tokens = tokens;
     this.passwords = passwords;
     this.refreshExpiration = refreshExpiration;
+    this.twoFactor = twoFactor;
+    this.challenges = challenges;
+    this.totp = totp;
     this.dummyHash = passwords.encode(UUID.randomUUID().toString());
   }
 
-  public AuthResult login(String username, String password, String tenantId) {
+  public LoginOutcome login(String username, String password, String tenantId) {
     List<Identity> candidates = identities.findCandidates(username, tenantId);
     if (candidates.isEmpty()) {
       passwords.matches(password, dummyHash);
@@ -58,7 +70,38 @@ public class LoginUseCase implements AuthenticationUseCase {
     if (matches != 1 || !match.isActive()) {
       throw new InvalidCredentialsException();
     }
-    return issueSession(match, revocations.sessionVersion(match.id()));
+    long version = revocations.sessionVersion(match.id());
+    if (twoFactor.find(match.id()).filter(TwoFactorEnrollment::enabled).isPresent()) {
+      return challenge(match, version);
+    }
+    return issueSession(match, version);
+  }
+
+  public AuthResult completeTwoFactorLogin(String challengeToken, String code) {
+    Instant now = clock.instant();
+    PendingTwoFactorLogin pending =
+        challenges
+            .attempt(AccountLifecycleUseCase.digest(challengeToken), now, TWO_FACTOR_MAX_ATTEMPTS)
+            .orElseThrow(InvalidCredentialsException::new);
+    Identity identity =
+        identities.findById(pending.userId()).orElseThrow(InvalidCredentialsException::new);
+    long version = revocations.sessionVersion(identity.id());
+    if (!identity.isActive()
+        || !Objects.equals(identity.tenantId(), pending.tenantId())
+        || version != pending.sessionVersion()) {
+      throw new InvalidCredentialsException();
+    }
+    TwoFactorEnrollment enrollment =
+        twoFactor
+            .find(identity.id())
+            .filter(TwoFactorEnrollment::enabled)
+            .orElseThrow(InvalidCredentialsException::new);
+    long counter =
+        totp.verify(enrollment.secret(), code, now).orElseThrow(InvalidCredentialsException::new);
+    if (!twoFactor.markUsed(identity.id(), counter) || !challenges.consume(pending.id())) {
+      throw new InvalidCredentialsException();
+    }
+    return issueSession(identity, version);
   }
 
   public AuthResult refresh(String token) {
@@ -107,6 +150,19 @@ public class LoginUseCase implements AuthenticationUseCase {
     } catch (IllegalArgumentException exception) {
       return false;
     }
+  }
+
+  private TwoFactorChallenge challenge(Identity identity, long version) {
+    String token = UUID.randomUUID() + "-" + UUID.randomUUID();
+    Instant expiresAt = clock.instant().plus(TWO_FACTOR_CHALLENGE_TTL);
+    challenges.save(
+        new PendingTwoFactorLogin(
+            AccountLifecycleUseCase.digest(token),
+            identity.id(),
+            identity.tenantId(),
+            version,
+            expiresAt));
+    return new TwoFactorChallenge(token, expiresAt);
   }
 
   private AuthResult issueSession(Identity identity, long version) {

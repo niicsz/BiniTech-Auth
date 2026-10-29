@@ -12,6 +12,7 @@ import com.binitech.auth.config.SecurityConfiguration;
 import com.binitech.auth.domain.*;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,7 +23,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(
-    controllers = AuthController.class,
+    controllers = {AuthController.class, TwoFactorController.class},
     properties = {
       "auth.service-key=test-machine-key-with-at-least-32-bytes",
       "jwt.secret=test-secret-key-with-at-least-32-bytes",
@@ -46,6 +47,9 @@ class AuthControllerTest {
   @MockitoBean RefreshSessionRepositoryPort sessions;
   @MockitoBean SessionRevocationPort revocations;
   @MockitoBean AccountRepositoryPort accounts;
+  @MockitoBean TwoFactorRepositoryPort twoFactor;
+  @MockitoBean TwoFactorChallengeRepositoryPort challenges;
+  @MockitoBean TotpPort totp;
   private Identity user;
 
   @BeforeEach
@@ -68,6 +72,73 @@ class AuthControllerTest {
         .andExpect(jsonPath("$.password").doesNotExist())
         .andExpect(
             header().string("Cache-Control", org.hamcrest.Matchers.containsString("no-store")));
+  }
+
+  @Test
+  void loginWithTwoFactor_returnsChallengeAndCompletesWithCode() throws Exception {
+    when(twoFactor.find("user1"))
+        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 5L)));
+    mvc.perform(
+            post("/api/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"username\":\"admin\",\"password\":\"password\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.twoFactorRequired").value(true))
+        .andExpect(jsonPath("$.challengeToken").isNotEmpty())
+        .andExpect(jsonPath("$.accessToken").doesNotExist());
+
+    when(challenges.attempt(anyString(), any(), anyInt()))
+        .thenReturn(
+            Optional.of(
+                new PendingTwoFactorLogin(
+                    "digest", "user1", "tenant1", 0L, java.time.Instant.now().plusSeconds(60))));
+    when(totp.verify(eq("secret"), eq("123456"), any())).thenReturn(OptionalLong.of(6L));
+    when(twoFactor.markUsed("user1", 6L)).thenReturn(true);
+    when(challenges.consume("digest")).thenReturn(true);
+    mvc.perform(
+            post("/api/auth/login/two-factor")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"challengeToken\":\"token\",\"code\":\"123456\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.accessToken").isNotEmpty());
+    mvc.perform(
+            post("/api/auth/login/two-factor")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"challengeToken\":\"token\",\"code\":\"12ab56\"}"))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void twoFactorEnrollment_requiresBearerAndValidatesCode() throws Exception {
+    mvc.perform(post("/api/auth/two-factor/setup")).andExpect(status().isUnauthorized());
+    String bearer = "Bearer " + tokens.issue(user, 0);
+    when(totp.provision("admin"))
+        .thenReturn(new TwoFactorSetup("c2VjcmV0", "otpauth://totp/x", "SHA512", 6, 30));
+    when(twoFactor.savePending("user1", "c2VjcmV0")).thenReturn(true);
+    mvc.perform(post("/api/auth/two-factor/setup").header("Authorization", bearer))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.secret").value("c2VjcmV0"))
+        .andExpect(jsonPath("$.algorithm").value("SHA512"));
+
+    when(twoFactor.find("user1"))
+        .thenReturn(Optional.of(new TwoFactorEnrollment(null, "c2VjcmV0", -1L)));
+    when(totp.verify(eq("c2VjcmV0"), anyString(), any())).thenReturn(OptionalLong.empty());
+    mvc.perform(
+            post("/api/auth/two-factor/enable")
+                .header("Authorization", bearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"123456\"}"))
+        .andExpect(status().isUnprocessableEntity())
+        .andExpect(jsonPath("$.code").value("INVALID_TWO_FACTOR_CODE"));
+
+    when(totp.verify(eq("c2VjcmV0"), eq("654321"), any())).thenReturn(OptionalLong.of(9L));
+    when(twoFactor.activate("user1", "c2VjcmV0", 9L)).thenReturn(true);
+    mvc.perform(
+            post("/api/auth/two-factor/enable")
+                .header("Authorization", bearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"654321\"}"))
+        .andExpect(status().isNoContent());
   }
 
   @Test

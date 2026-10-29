@@ -3,6 +3,7 @@ package com.binitech.auth.adapters.outbound.persistence;
 import static org.junit.jupiter.api.Assertions.*;
 
 import com.binitech.auth.domain.Account;
+import com.binitech.auth.domain.PendingTwoFactorLogin;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import java.time.*;
@@ -99,5 +100,38 @@ class MongoAdaptersIT {
     assertFalse(accounts.completeRecovery("valid", "replayed", now));
     assertEquals(1, revocations.sessionVersion("user"));
     assertEquals("replacement", accounts.find("user").orElseThrow().password());
+  }
+
+  @Test
+  void twoFactorEnrollmentActivatesOnceAndRejectsReplayedCounters() {
+    accounts.provision(new Account("user", "user", "hash", "t1", true, false, null));
+    var twoFactor = new MongoTwoFactorAdapter(mongo, "pdv");
+    assertFalse(new MongoTwoFactorAdapter(mongo, "another-app").savePending("user", "s"));
+    assertTrue(twoFactor.savePending("user", "secret"));
+    assertFalse(twoFactor.activate("user", "other", 10));
+    assertTrue(twoFactor.activate("user", "secret", 10));
+    assertFalse(twoFactor.savePending("user", "replacement"));
+    var enrollment = twoFactor.find("user").orElseThrow();
+    assertTrue(enrollment.enabled());
+    assertEquals(10L, enrollment.lastCounter());
+    assertFalse(twoFactor.markUsed("user", 10));
+    assertTrue(twoFactor.markUsed("user", 11));
+    assertFalse(twoFactor.disable("user", "secret", 11));
+    assertTrue(twoFactor.disable("user", "secret", 12));
+    assertFalse(twoFactor.find("user").orElseThrow().enabled());
+  }
+
+  @Test
+  void twoFactorChallengeLimitsAttemptsExpiresAndIsSingleUse() {
+    var challenges = new MongoTwoFactorChallengeAdapter(mongo);
+    Instant now = Instant.now();
+    challenges.save(new PendingTwoFactorLogin("c1", "user", "t1", 2L, now.plusSeconds(60)));
+    challenges.save(new PendingTwoFactorLogin("c2", "user", "t1", 0L, now));
+    assertTrue(challenges.attempt("c2", now, 5).isEmpty());
+    assertEquals(2L, challenges.attempt("c1", now, 2).orElseThrow().sessionVersion());
+    assertTrue(challenges.attempt("c1", now, 2).isPresent());
+    assertTrue(challenges.attempt("c1", now, 2).isEmpty());
+    assertTrue(challenges.consume("c1"));
+    assertFalse(challenges.consume("c1"));
   }
 }

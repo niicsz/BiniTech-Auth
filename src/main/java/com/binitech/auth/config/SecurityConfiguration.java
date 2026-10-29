@@ -32,7 +32,14 @@ public class SecurityConfiguration {
                 auth.requestMatchers("/api/internal/**")
                     .hasRole("IDENTITY_CLIENT")
                     .requestMatchers(
-                        HttpMethod.POST, "/api/auth/login", "/api/auth/refresh", "/api/auth/logout")
+                        HttpMethod.POST,
+                        "/api/auth/login",
+                        "/api/auth/login/two-factor",
+                        "/api/auth/refresh",
+                        "/api/auth/logout",
+                        "/api/auth/two-factor/setup",
+                        "/api/auth/two-factor/enable",
+                        "/api/auth/two-factor/disable")
                     .permitAll()
                     .requestMatchers(
                         HttpMethod.GET,

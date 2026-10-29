@@ -1,10 +1,13 @@
 package com.binitech.auth.application.ports.inbound;
 
 import com.binitech.auth.domain.AuthResult;
+import com.binitech.auth.domain.LoginOutcome;
 import com.binitech.auth.domain.SessionIdentity;
 
 public interface AuthenticationUseCase {
-  AuthResult login(String username, String password, String tenantId);
+  LoginOutcome login(String username, String password, String tenantId);
+
+  AuthResult completeTwoFactorLogin(String challengeToken, String code);
 
   AuthResult refresh(String refreshToken);
 
