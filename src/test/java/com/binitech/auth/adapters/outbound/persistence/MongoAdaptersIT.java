@@ -122,6 +122,27 @@ class MongoAdaptersIT {
   }
 
   @Test
+  void threeTwoFactorFailuresLockUntilGivenInstantAndSuccessResetsCount() {
+    accounts.provision(new Account("user", "user", "hash", "t1", true, false, null));
+    var twoFactor = new MongoTwoFactorAdapter(mongo, "pdv");
+    twoFactor.savePending("user", "secret");
+    twoFactor.activate("user", "secret", 10);
+    Instant lockUntil = Instant.parse("2030-01-01T00:00:00Z");
+
+    assertEquals(2, twoFactor.registerFailure("user", 3, lockUntil).remainingAttempts());
+    assertTrue(twoFactor.markUsed("user", 11));
+    assertEquals(2, twoFactor.registerFailure("user", 3, lockUntil).remainingAttempts());
+    assertEquals(1, twoFactor.registerFailure("user", 3, lockUntil).remainingAttempts());
+    var locked = twoFactor.registerFailure("user", 3, lockUntil);
+    assertTrue(locked.locked());
+    assertEquals(lockUntil, locked.lockedUntil());
+    assertEquals(lockUntil, twoFactor.find("user").orElseThrow().lockedUntil());
+    assertTrue(
+        twoFactor.find("user").orElseThrow().lockedAt(Instant.parse("2029-12-31T23:00:00Z")));
+    assertEquals(2, twoFactor.registerFailure("user", 3, lockUntil).remainingAttempts());
+  }
+
+  @Test
   void twoFactorChallengeLimitsAttemptsExpiresAndIsSingleUse() {
     var challenges = new MongoTwoFactorChallengeAdapter(mongo);
     Instant now = Instant.now();

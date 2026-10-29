@@ -2,9 +2,13 @@ package com.binitech.auth.adapters.outbound.persistence;
 
 import com.binitech.auth.application.ports.outbound.TwoFactorRepositoryPort;
 import com.binitech.auth.domain.TwoFactorEnrollment;
+import com.binitech.auth.domain.TwoFactorFailure;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.FindOneAndUpdateOptions;
+import com.mongodb.client.model.ReturnDocument;
 import java.time.Instant;
 import java.util.Date;
+import java.util.List;
 import java.util.Optional;
 import org.bson.Document;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,7 +37,10 @@ public class MongoTwoFactorAdapter implements TwoFactorRepositoryPort {
                 new TwoFactorEnrollment(
                     d.getString("totpSecret"),
                     d.getString("totpPendingSecret"),
-                    ((Number) d.getOrDefault("totpLastCounter", -1L)).longValue()));
+                    ((Number) d.getOrDefault("totpLastCounter", -1L)).longValue(),
+                    Optional.ofNullable(d.getDate("totpLockedUntil"))
+                        .map(Date::toInstant)
+                        .orElse(null)));
   }
 
   public boolean savePending(String userId, String secret) {
@@ -67,7 +74,9 @@ public class MongoTwoFactorAdapter implements TwoFactorRepositoryPort {
                 identity(userId)
                     .append("totpSecret", new Document("$exists", true))
                     .append("totpLastCounter", new Document("$lt", counter)),
-                new Document("$set", new Document("totpLastCounter", counter)))
+                new Document(
+                    "$set",
+                    new Document("totpLastCounter", counter).append("totpFailedAttempts", 0)))
             .getModifiedCount()
         == 1;
   }
@@ -83,8 +92,46 @@ public class MongoTwoFactorAdapter implements TwoFactorRepositoryPort {
                     new Document("totpSecret", "")
                         .append("totpPendingSecret", "")
                         .append("totpLastCounter", "")
-                        .append("totpEnabledAt", "")))
+                        .append("totpEnabledAt", "")
+                        .append("totpFailedAttempts", "")
+                        .append("totpLockedUntil", "")))
             .getModifiedCount()
         == 1;
+  }
+
+  public TwoFactorFailure registerFailure(String userId, int maxFailures, Instant lockUntil) {
+    Document reachedLimit = new Document("$gte", List.of("$totpFailedAttempts", maxFailures));
+    Document after =
+        identities.findOneAndUpdate(
+            identity(userId).append("totpSecret", new Document("$exists", true)),
+            List.of(
+                new Document(
+                    "$set",
+                    new Document(
+                        "totpFailedAttempts",
+                        new Document(
+                            "$add",
+                            List.of(
+                                new Document("$ifNull", List.of("$totpFailedAttempts", 0)), 1)))),
+                new Document(
+                    "$set",
+                    new Document(
+                            "totpLockedUntil",
+                            new Document(
+                                "$cond",
+                                List.of(reachedLimit, Date.from(lockUntil), "$totpLockedUntil")))
+                        .append(
+                            "totpFailedAttempts",
+                            new Document(
+                                "$cond", List.of(reachedLimit, 0, "$totpFailedAttempts"))))),
+            new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
+    if (after == null) {
+      return new TwoFactorFailure(maxFailures, null);
+    }
+    int failures = ((Number) after.getOrDefault("totpFailedAttempts", 0)).intValue();
+    if (failures == 0) {
+      return new TwoFactorFailure(0, after.getDate("totpLockedUntil").toInstant());
+    }
+    return new TwoFactorFailure(maxFailures - failures, null);
   }
 }

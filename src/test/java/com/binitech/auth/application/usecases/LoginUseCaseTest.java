@@ -7,7 +7,10 @@ import static org.mockito.Mockito.*;
 import com.binitech.auth.application.ports.outbound.*;
 import com.binitech.auth.domain.*;
 import com.binitech.auth.domain.exception.InvalidCredentialsException;
+import com.binitech.auth.domain.exception.InvalidTwoFactorCodeException;
+import com.binitech.auth.domain.exception.TwoFactorLockedException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -61,7 +64,7 @@ class LoginUseCaseTest {
     when(passwords.matches("password", "hash")).thenReturn(true);
     when(revocations.sessionVersion("user1")).thenReturn(3L);
     when(twoFactor.find("user1"))
-        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 10L)));
+        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 10L, null)));
 
     var result = useCase.login("admin", "password", "tenant1");
 
@@ -84,7 +87,7 @@ class LoginUseCaseTest {
     when(identities.findById("user1")).thenReturn(Optional.of(user));
     when(revocations.sessionVersion("user1")).thenReturn(3L);
     when(twoFactor.find("user1"))
-        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 10L)));
+        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 10L, null)));
     when(totp.verify("secret", "123456", now)).thenReturn(OptionalLong.of(11L));
     when(twoFactor.markUsed("user1", 11L)).thenReturn(true);
     when(challenges.consume(digest)).thenReturn(true);
@@ -100,22 +103,61 @@ class LoginUseCaseTest {
     when(challenges.attempt(digest, now, 5)).thenReturn(Optional.of(pending));
     when(identities.findById("user1")).thenReturn(Optional.of(user));
     when(twoFactor.find("user1"))
-        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 10L)));
+        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 10L, null)));
     when(totp.verify("secret", "000000", now)).thenReturn(OptionalLong.empty());
     when(totp.verify("secret", "123456", now)).thenReturn(OptionalLong.of(10L));
 
-    assertThrows(
-        InvalidCredentialsException.class,
-        () -> useCase.completeTwoFactorLogin("challenge", "000000"));
-    assertThrows(
-        InvalidCredentialsException.class,
-        () -> useCase.completeTwoFactorLogin("challenge", "123456"));
+    Instant lockUntil = now.plus(Duration.ofHours(1));
+    when(twoFactor.registerFailure("user1", 3, lockUntil))
+        .thenReturn(new TwoFactorFailure(2, null))
+        .thenReturn(new TwoFactorFailure(0, lockUntil));
+
+    var wrong =
+        assertThrows(
+            InvalidTwoFactorCodeException.class,
+            () -> useCase.completeTwoFactorLogin("challenge", "000000"));
+    assertEquals(2, wrong.remainingAttempts());
+    var locked =
+        assertThrows(
+            TwoFactorLockedException.class,
+            () -> useCase.completeTwoFactorLogin("challenge", "123456"));
+    assertEquals(lockUntil, locked.lockedUntil());
     when(challenges.attempt(digest, now, 5)).thenReturn(Optional.empty());
     assertThrows(
         InvalidCredentialsException.class,
         () -> useCase.completeTwoFactorLogin("challenge", "123456"));
     verify(challenges, never()).consume(anyString());
     verifyNoInteractions(tokens, sessions);
+  }
+
+  @Test
+  void lockedUserCannotStartOrCompleteTwoFactorLoginUntilLockExpires() {
+    Instant lockedUntil = now.plusSeconds(1800);
+    when(identities.findCandidates("admin", "tenant1")).thenReturn(List.of(user));
+    when(passwords.matches("password", "hash")).thenReturn(true);
+    when(twoFactor.find("user1"))
+        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 10L, lockedUntil)));
+
+    var locked =
+        assertThrows(
+            TwoFactorLockedException.class, () -> useCase.login("admin", "password", "tenant1"));
+    assertEquals(lockedUntil, locked.lockedUntil());
+    verify(challenges, never()).save(any());
+
+    String digest = AccountLifecycleUseCase.digest("challenge");
+    when(challenges.attempt(digest, now, 5))
+        .thenReturn(
+            Optional.of(
+                new PendingTwoFactorLogin(digest, "user1", "tenant1", 0L, now.plusSeconds(60))));
+    when(identities.findById("user1")).thenReturn(Optional.of(user));
+    assertThrows(
+        TwoFactorLockedException.class,
+        () -> useCase.completeTwoFactorLogin("challenge", "123456"));
+    verifyNoInteractions(totp, tokens);
+
+    when(twoFactor.find("user1"))
+        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 10L, now.minusSeconds(1))));
+    assertInstanceOf(TwoFactorChallenge.class, useCase.login("admin", "password", "tenant1"));
   }
 
   @Test

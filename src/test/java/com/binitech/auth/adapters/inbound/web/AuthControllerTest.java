@@ -77,7 +77,7 @@ class AuthControllerTest {
   @Test
   void loginWithTwoFactor_returnsChallengeAndCompletesWithCode() throws Exception {
     when(twoFactor.find("user1"))
-        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 5L)));
+        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 5L, null)));
     mvc.perform(
             post("/api/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -109,6 +109,56 @@ class AuthControllerTest {
   }
 
   @Test
+  void twoFactorFailures_reportRemainingAttemptsAndLockForOneHour() throws Exception {
+    when(twoFactor.find("user1"))
+        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 5L, null)));
+    when(challenges.attempt(anyString(), any(), anyInt()))
+        .thenReturn(
+            Optional.of(
+                new PendingTwoFactorLogin(
+                    "digest", "user1", "tenant1", 0L, java.time.Instant.now().plusSeconds(60))));
+    when(totp.verify(eq("secret"), anyString(), any())).thenReturn(OptionalLong.empty());
+    var lockedUntil = java.time.Instant.parse("2026-10-29T20:00:00Z");
+    when(twoFactor.registerFailure(eq("user1"), eq(3), any()))
+        .thenReturn(new TwoFactorFailure(2, null))
+        .thenReturn(new TwoFactorFailure(0, lockedUntil));
+    var request =
+        post("/api/auth/login/two-factor")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"challengeToken\":\"token\",\"code\":\"000000\"}");
+
+    mvc.perform(request)
+        .andExpect(status().isUnprocessableEntity())
+        .andExpect(jsonPath("$.code").value("INVALID_TWO_FACTOR_CODE"))
+        .andExpect(jsonPath("$.remainingAttempts").value(2))
+        .andExpect(jsonPath("$.lockedUntil").doesNotExist())
+        .andExpect(
+            jsonPath("$.message")
+                .value("Código de verificação inválido. Restam 2 tentativas antes do bloqueio."));
+    mvc.perform(request)
+        .andExpect(status().isLocked())
+        .andExpect(jsonPath("$.code").value("TWO_FACTOR_LOCKED"))
+        .andExpect(jsonPath("$.lockedUntil").value("2026-10-29T20:00:00Z"))
+        .andExpect(
+            jsonPath("$.message")
+                .value(
+                    "Usuário bloqueado por 1 hora após 3 tentativas inválidas do código de"
+                        + " verificação."));
+
+    when(twoFactor.find("user1"))
+        .thenReturn(
+            Optional.of(
+                new TwoFactorEnrollment(
+                    "secret", null, 5L, lockedUntil.plusSeconds(3600 * 24 * 365))));
+    mvc.perform(
+            post("/api/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"username\":\"admin\",\"password\":\"password\"}"))
+        .andExpect(status().isLocked())
+        .andExpect(jsonPath("$.code").value("TWO_FACTOR_LOCKED"));
+  }
+
+  @Test
   void twoFactorEnrollment_requiresBearerAndValidatesCode() throws Exception {
     mvc.perform(post("/api/auth/two-factor/setup")).andExpect(status().isUnauthorized());
     String bearer = "Bearer " + tokens.issue(user, 0);
@@ -121,7 +171,7 @@ class AuthControllerTest {
         .andExpect(jsonPath("$.algorithm").value("SHA512"));
 
     when(twoFactor.find("user1"))
-        .thenReturn(Optional.of(new TwoFactorEnrollment(null, "c2VjcmV0", -1L)));
+        .thenReturn(Optional.of(new TwoFactorEnrollment(null, "c2VjcmV0", -1L, null)));
     when(totp.verify(eq("c2VjcmV0"), anyString(), any())).thenReturn(OptionalLong.empty());
     mvc.perform(
             post("/api/auth/two-factor/enable")

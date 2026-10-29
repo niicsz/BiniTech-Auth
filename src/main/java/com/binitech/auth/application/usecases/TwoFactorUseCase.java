@@ -10,6 +10,7 @@ import com.binitech.auth.domain.TwoFactorSetup;
 import com.binitech.auth.domain.exception.InvalidTwoFactorCodeException;
 import com.binitech.auth.domain.exception.TwoFactorConflictException;
 import java.time.Clock;
+import java.time.Instant;
 
 public class TwoFactorUseCase implements TwoFactorManagement {
   private final AuthenticationUseCase authentication;
@@ -59,11 +60,12 @@ public class TwoFactorUseCase implements TwoFactorManagement {
             .find(identity.userId())
             .filter(TwoFactorEnrollment::enabled)
             .orElseThrow(TwoFactorConflictException::new);
-    long counter =
-        totp.verify(enrollment.secret(), code, clock.instant())
-            .orElseThrow(InvalidTwoFactorCodeException::new);
-    if (!twoFactor.disable(identity.userId(), enrollment.secret(), counter)) {
-      throw new InvalidTwoFactorCodeException();
+    Instant now = clock.instant();
+    TwoFactorLockout.ensureUnlocked(enrollment, now);
+    var counter = totp.verify(enrollment.secret(), code, now);
+    if (counter.isEmpty()
+        || !twoFactor.disable(identity.userId(), enrollment.secret(), counter.getAsLong())) {
+      throw TwoFactorLockout.failure(twoFactor, identity.userId(), now);
     }
   }
 }
