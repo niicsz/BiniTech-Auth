@@ -90,6 +90,13 @@ public class AccountLifecycleUseCase implements AccountLifecycle {
     revocations.revoke(id);
   }
 
+  public void purgeTenant(String tenantId) {
+    if (tenantId == null || tenantId.isBlank()) {
+      throw new IllegalArgumentException("tenantId is required");
+    }
+    accounts.purgeTenant(tenantId);
+  }
+
   private void requirePassword(String password) {
     if (password == null || password.length() < 6 || password.length() > 1024) {
       throw new IllegalArgumentException("Password must contain 6 to 1024 characters");

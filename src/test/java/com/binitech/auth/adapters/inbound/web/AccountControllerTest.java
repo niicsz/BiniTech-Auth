@@ -55,4 +55,36 @@ class AccountControllerTest {
         .andExpect(status().isNoContent());
     verify(accounts).revokeSessions("u1");
   }
+
+  @Test
+  void purgeTenantRequiresMachineCredential() throws Exception {
+    mvc.perform(
+            post("/api/internal/identities/purge-tenant")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tenantId\":\"t1\"}"))
+        .andExpect(status().isUnauthorized());
+    verifyNoInteractions(accounts);
+  }
+
+  @Test
+  void purgeTenantWithMachineCredential() throws Exception {
+    mvc.perform(
+            post("/api/internal/identities/purge-tenant")
+                .header("X-Auth-Service-Key", "test-machine-key-with-at-least-32-bytes")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tenantId\":\"t1\"}"))
+        .andExpect(status().isNoContent());
+    verify(accounts).purgeTenant("t1");
+  }
+
+  @Test
+  void purgeTenantRejectsBlankTenant() throws Exception {
+    mvc.perform(
+            post("/api/internal/identities/purge-tenant")
+                .header("X-Auth-Service-Key", "test-machine-key-with-at-least-32-bytes")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tenantId\":\"\"}"))
+        .andExpect(status().isBadRequest());
+    verifyNoInteractions(accounts);
+  }
 }

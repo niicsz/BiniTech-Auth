@@ -54,6 +54,12 @@ public class AccountController {
     return ResponseEntity.noContent().build();
   }
 
+  @PostMapping("/purge-tenant")
+  public ResponseEntity<Void> purgeTenant(@Valid @RequestBody PurgeTenant request) {
+    accounts.purgeTenant(request.tenantId());
+    return ResponseEntity.noContent().build();
+  }
+
   public record Provision(
       @NotBlank @Size(max = 200) String identityId,
       @NotBlank @Size(max = 200) String username,
@@ -73,4 +79,6 @@ public class AccountController {
       @NotBlank @Size(min = 6, max = 1024) String newPassword) {}
 
   public record Revoke(@NotBlank @Size(max = 200) String identityId) {}
+
+  public record PurgeTenant(@NotBlank @Size(max = 200) String tenantId) {}
 }

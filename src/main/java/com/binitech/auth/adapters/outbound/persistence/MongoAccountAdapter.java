@@ -15,11 +15,13 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class MongoAccountAdapter implements AccountRepositoryPort {
   private final MongoCollection<Document> identities;
+  private final MongoCollection<Document> refreshTokens;
   private final String application;
 
   public MongoAccountAdapter(
       MongoTemplate mongo, @Value("${auth.application-id:pdv}") String application) {
     this.identities = mongo.getCollection("identities");
+    this.refreshTokens = mongo.getCollection("refresh_tokens");
     this.application = application;
   }
 
@@ -94,6 +96,11 @@ public class MongoAccountAdapter implements AccountRepositoryPort {
                 passwordUpdate(replacementHash))
             .getModifiedCount()
         == 1;
+  }
+
+  public long purgeTenant(String tenantId) {
+    refreshTokens.deleteMany(new Document("tenantId", tenantId));
+    return identities.deleteMany(scope().append("tenantId", tenantId)).getDeletedCount();
   }
 
   private Account map(Document d) {

@@ -14,4 +14,6 @@ public interface AccountLifecycle {
   void completeRecovery(String token, String newPassword);
 
   void revokeSessions(String identityId);
+
+  void purgeTenant(String tenantId);
 }

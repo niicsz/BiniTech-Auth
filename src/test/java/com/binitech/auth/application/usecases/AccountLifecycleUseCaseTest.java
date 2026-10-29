@@ -22,6 +22,19 @@ class AccountLifecycleUseCaseTest {
       new Account("user1", "user", "hash", "tenant", true, false, "recovery@example.com");
 
   @Test
+  void purgesTenantAccounts() {
+    useCase.purgeTenant("tenant");
+    verify(accounts).purgeTenant("tenant");
+  }
+
+  @Test
+  void refusesPurgeWithoutTenant() {
+    assertThrows(IllegalArgumentException.class, () -> useCase.purgeTenant(" "));
+    assertThrows(IllegalArgumentException.class, () -> useCase.purgeTenant(null));
+    verify(accounts, never()).purgeTenant(any());
+  }
+
+  @Test
   void changesPasswordUsingAtomicCompareAndSwap() {
     when(accounts.find("user1")).thenReturn(Optional.of(account));
     when(passwords.matches("current", "hash")).thenReturn(true);
