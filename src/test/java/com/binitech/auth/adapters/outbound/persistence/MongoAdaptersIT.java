@@ -7,6 +7,7 @@ import com.binitech.auth.domain.PendingTwoFactorLogin;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import java.time.*;
+import java.util.List;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -108,17 +109,47 @@ class MongoAdaptersIT {
     var twoFactor = new MongoTwoFactorAdapter(mongo, "pdv");
     assertFalse(new MongoTwoFactorAdapter(mongo, "another-app").savePending("user", "s"));
     assertTrue(twoFactor.savePending("user", "secret"));
-    assertFalse(twoFactor.activate("user", "other", 10));
-    assertTrue(twoFactor.activate("user", "secret", 10));
+    assertFalse(twoFactor.activate("user", "other", 10, List.of("r1")));
+    assertTrue(twoFactor.activate("user", "secret", 10, List.of("r1", "r2")));
     assertFalse(twoFactor.savePending("user", "replacement"));
     var enrollment = twoFactor.find("user").orElseThrow();
     assertTrue(enrollment.enabled());
     assertEquals(10L, enrollment.lastCounter());
+    assertEquals(List.of("r1", "r2"), enrollment.recoveryCodes());
     assertFalse(twoFactor.markUsed("user", 10));
     assertTrue(twoFactor.markUsed("user", 11));
-    assertFalse(twoFactor.disable("user", "secret", 11));
-    assertTrue(twoFactor.disable("user", "secret", 12));
-    assertFalse(twoFactor.find("user").orElseThrow().enabled());
+    assertFalse(twoFactor.disable("user", "other"));
+    assertTrue(twoFactor.disable("user", "secret"));
+    var disabled = twoFactor.find("user").orElseThrow();
+    assertFalse(disabled.enabled());
+    assertTrue(disabled.recoveryCodes().isEmpty());
+  }
+
+  @Test
+  void recoveryCodesAreSingleUseReplaceableAndResetClearsEverything() {
+    accounts.provision(new Account("user", "user", "hash", "t1", true, false, null));
+    var twoFactor = new MongoTwoFactorAdapter(mongo, "pdv");
+    twoFactor.savePending("user", "secret");
+    twoFactor.activate("user", "secret", 10, List.of("r1", "r2"));
+    Instant lockUntil = Instant.parse("2030-01-01T00:00:00Z");
+    twoFactor.registerFailure("user", 3, lockUntil);
+
+    assertFalse(twoFactor.useRecoveryCode("user", "other", "r1"));
+    assertTrue(twoFactor.useRecoveryCode("user", "secret", "r1"));
+    assertFalse(twoFactor.useRecoveryCode("user", "secret", "r1"));
+    assertEquals(List.of("r2"), twoFactor.find("user").orElseThrow().recoveryCodes());
+    assertEquals(2, twoFactor.registerFailure("user", 3, lockUntil).remainingAttempts());
+    assertTrue(twoFactor.replaceRecoveryCodes("user", "secret", List.of("r3")));
+    assertFalse(twoFactor.useRecoveryCode("user", "secret", "r2"));
+    assertTrue(twoFactor.useRecoveryCode("user", "secret", "r3"));
+
+    assertTrue(twoFactor.reset("user"));
+    assertFalse(twoFactor.reset("user"));
+    assertFalse(twoFactor.reset("missing"));
+    var cleared = twoFactor.find("user").orElseThrow();
+    assertFalse(cleared.enabled());
+    assertNull(cleared.lockedUntil());
+    assertTrue(twoFactor.savePending("user", "fresh"));
   }
 
   @Test
@@ -126,7 +157,7 @@ class MongoAdaptersIT {
     accounts.provision(new Account("user", "user", "hash", "t1", true, false, null));
     var twoFactor = new MongoTwoFactorAdapter(mongo, "pdv");
     twoFactor.savePending("user", "secret");
-    twoFactor.activate("user", "secret", 10);
+    twoFactor.activate("user", "secret", 10, List.of());
     Instant lockUntil = Instant.parse("2030-01-01T00:00:00Z");
 
     assertEquals(2, twoFactor.registerFailure("user", 3, lockUntil).remainingAttempts());

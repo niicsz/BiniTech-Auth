@@ -45,6 +45,7 @@ class AuthenticationFlowTest {
             mock(TwoFactorRepositoryPort.class),
             mock(TwoFactorChallengeRepositoryPort.class),
             mock(TotpPort.class),
+            mock(RecoveryCodePort.class),
             Clock.systemUTC());
     user =
         new Identity(

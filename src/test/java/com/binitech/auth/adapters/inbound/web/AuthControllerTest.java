@@ -1,5 +1,6 @@
 package com.binitech.auth.adapters.inbound.web;
 
+import static org.hamcrest.Matchers.matchesPattern;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -37,6 +38,7 @@ import org.springframework.test.web.servlet.MockMvc;
   BeanConfiguration.class,
   JwtAccessTokenAdapter.class,
   Argon2PasswordAdapter.class,
+  HmacRecoveryCodeAdapter.class,
   AuthExceptionHandler.class
 })
 class AuthControllerTest {
@@ -77,7 +79,7 @@ class AuthControllerTest {
   @Test
   void loginWithTwoFactor_returnsChallengeAndCompletesWithCode() throws Exception {
     when(twoFactor.find("user1"))
-        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 5L, null)));
+        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 5L, null, null)));
     mvc.perform(
             post("/api/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -111,7 +113,7 @@ class AuthControllerTest {
   @Test
   void twoFactorFailures_reportRemainingAttemptsAndLockForOneHour() throws Exception {
     when(twoFactor.find("user1"))
-        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 5L, null)));
+        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 5L, null, null)));
     when(challenges.attempt(anyString(), any(), anyInt()))
         .thenReturn(
             Optional.of(
@@ -149,7 +151,7 @@ class AuthControllerTest {
         .thenReturn(
             Optional.of(
                 new TwoFactorEnrollment(
-                    "secret", null, 5L, lockedUntil.plusSeconds(3600 * 24 * 365))));
+                    "secret", null, 5L, lockedUntil.plusSeconds(3600 * 24 * 365), null)));
     mvc.perform(
             post("/api/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -176,7 +178,7 @@ class AuthControllerTest {
         .andExpect(jsonPath("$.algorithm").value("SHA512"));
 
     when(twoFactor.find("user1"))
-        .thenReturn(Optional.of(new TwoFactorEnrollment(null, "c2VjcmV0", -1L, null)));
+        .thenReturn(Optional.of(new TwoFactorEnrollment(null, "c2VjcmV0", -1L, null, null)));
     when(totp.verify(eq("c2VjcmV0"), anyString(), any())).thenReturn(OptionalLong.empty());
     mvc.perform(
             post("/api/auth/two-factor/enable")
@@ -187,13 +189,15 @@ class AuthControllerTest {
         .andExpect(jsonPath("$.code").value("INVALID_TWO_FACTOR_CODE"));
 
     when(totp.verify(eq("c2VjcmV0"), eq("654321"), any())).thenReturn(OptionalLong.of(9L));
-    when(twoFactor.activate("user1", "c2VjcmV0", 9L)).thenReturn(true);
+    when(twoFactor.activate(eq("user1"), eq("c2VjcmV0"), eq(9L), anyList())).thenReturn(true);
     mvc.perform(
             post("/api/auth/two-factor/enable")
                 .header("Authorization", bearer)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"code\":\"654321\"}"))
-        .andExpect(status().isNoContent());
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.recoveryCodes.length()").value(10))
+        .andExpect(jsonPath("$.recoveryCodes[0]").value(matchesPattern("[A-Z2-9]{5}-[A-Z2-9]{5}")));
   }
 
   @Test

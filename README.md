@@ -28,14 +28,16 @@ As dependências apontam para dentro. Domínio e aplicação usam somente Java e
 | Método e caminho | Entrada | Sucesso |
 | --- | --- | --- |
 | `POST /api/auth/login` | JSON `username`, `password`, `tenantId` opcional | 200, tokens e identidade |
-| `POST /api/auth/login/two-factor` | JSON `challengeToken`, `code` | 200, tokens e identidade |
+| `POST /api/auth/login/two-factor` | JSON `challengeToken`, `code` (TOTP ou código de recuperação) | 200, tokens e identidade |
 | `POST /api/auth/refresh` | JSON `refreshToken` | 200, novos tokens |
 | `GET /api/auth/session` | `Authorization: Bearer <accessToken>` | 200, `userId`, `username`, `role`, `tenantId` |
 | `POST /api/auth/logout` | `Authorization: Bearer <accessToken>` | 204 |
-| `GET /api/auth/two-factor` | `Authorization: Bearer <accessToken>` | 200, `enabled`, `lockedUntil` |
-| `POST /api/auth/two-factor/setup` | `Authorization: Bearer <accessToken>` | 200, `secret` (base64), `otpauthUri`, `algorithm`, `digits`, `period` |
-| `POST /api/auth/two-factor/enable` | Bearer + JSON `code` | 204 |
-| `POST /api/auth/two-factor/disable` | Bearer + JSON `code` | 204 |
+| `GET /api/auth/two-factor` | `Authorization: Bearer <accessToken>` | 200, `enabled`, `lockedUntil`, `recoveryCodesRemaining` |
+| `POST /api/auth/two-factor/setup` | `Authorization: Bearer <accessToken>` | 200, `otpauthUri`, `algorithm`, `digits`, `period` |
+| `POST /api/auth/two-factor/enable` | Bearer + JSON `code` | 200, `recoveryCodes` |
+| `POST /api/auth/two-factor/recovery-codes` | Bearer + JSON `code` (TOTP ou recuperação) | 200, novos `recoveryCodes` |
+| `POST /api/auth/two-factor/disable` | Bearer + JSON `code` (TOTP ou recuperação) | 204 |
+| `POST /api/internal/identities/two-factor/reset` | `X-Auth-Service-Key` + JSON `identityId` | 200, `reset` |
 | `GET /actuator/health` | Nenhuma | 200 quando saudável |
 
 Login e refresh retornam:
@@ -59,6 +61,8 @@ Aplicações podem consultar `/api/auth/session` pelo backend, sem receber segre
 TOTP conforme RFC 6238 com HMAC-SHA1 (padrão), HMAC-SHA256 ou HMAC-SHA512. A chave é gerada com `SecureRandom` no tamanho da saída do hash (20, 32 ou 64 bytes) e armazenada cifrada com AES-256-GCM, com chave derivada do `SECURITY_PEPPER` via HMAC-SHA256; um vazamento do banco não expõe as chaves 2FA. O algoritmo fica gravado junto com a chave de cada usuário, então trocar `AUTH_TOTP_ALGORITHM` só afeta novas ativações. O código é calculado com o contador `floor(epochSeconds / período)` em 8 bytes big-endian, HMAC com a chave e truncamento dinâmico (offset nos 4 bits finais do hash, 31 bits, módulo `10^dígitos`). A `otpauthUri` leva a chave em base32 para leitura por QR code. Google Authenticator, Microsoft Authenticator e Authy ignoram `algorithm=SHA256/SHA512` e calculam com SHA1, por isso o padrão é SHA1.
 
 Ativação: `setup` gera uma chave pendente; `enable` confirma com um código válido. Com 2FA ativo, `login` responde 200 com `{"twoFactorRequired": true, "challengeToken", "expiresAt"}` em vez de tokens. O desafio vale 5 minutos, aceita 5 tentativas, é guardado apenas como SHA-256 e consumido uma única vez em `/login/two-factor`. Cada passo de tempo aceito é gravado (`totpLastCounter`), então um código não pode ser reutilizado. Troca de senha entre o login e o segundo fator invalida o desafio. Código errado em `/login/two-factor` ou `disable` retorna 422 `INVALID_TWO_FACTOR_CODE` com `remainingAttempts`. Na terceira falha seguida o usuário fica bloqueado por 1 hora: a resposta é 423 `TWO_FACTOR_LOCKED` com `lockedUntil` e a mensagem pronta para a tela, e enquanto durar o bloqueio o login com senha correta, a conclusão do segundo fator e o `disable` também retornam 423. Um código aceito zera o contador. Estado incompatível retorna 409 `TWO_FACTOR_CONFLICT`.
+
+Códigos de recuperação: `enable` devolve 10 códigos `XXXXX-XXXXX` (alfabeto sem 0/O/1/I, cerca de 50 bits cada), exibidos uma única vez. O banco guarda apenas HMAC-SHA256 com chave derivada do `SECURITY_PEPPER`. Cada código substitui o TOTP uma vez no login, no `disable` ou em `recovery-codes`, é removido atomicamente ao ser usado e falhas contam para o mesmo bloqueio de 3 tentativas. `recovery-codes` gera um novo conjunto e invalida o anterior. O reset interno remove chave, códigos, contador e bloqueio de uma identidade para o administrador do PDV; o usuário pode ativar de novo em seguida.
 
 ## Persistência e compatibilidade
 

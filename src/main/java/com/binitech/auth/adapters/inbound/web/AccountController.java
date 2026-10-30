@@ -1,6 +1,7 @@
 package com.binitech.auth.adapters.inbound.web;
 
 import com.binitech.auth.application.ports.inbound.AccountLifecycle;
+import com.binitech.auth.application.ports.inbound.TwoFactorManagement;
 import com.binitech.auth.domain.RecoveryDelivery;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -12,9 +13,11 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/internal/identities")
 public class AccountController {
   private final AccountLifecycle accounts;
+  private final TwoFactorManagement twoFactor;
 
-  public AccountController(AccountLifecycle accounts) {
+  public AccountController(AccountLifecycle accounts, TwoFactorManagement twoFactor) {
     this.accounts = accounts;
+    this.twoFactor = twoFactor;
   }
 
   @PostMapping("/provision")
@@ -54,6 +57,11 @@ public class AccountController {
     return ResponseEntity.noContent().build();
   }
 
+  @PostMapping("/two-factor/reset")
+  public TwoFactorReset resetTwoFactor(@Valid @RequestBody Revoke request) {
+    return new TwoFactorReset(twoFactor.reset(request.identityId()));
+  }
+
   @PostMapping("/purge-tenant")
   public ResponseEntity<Void> purgeTenant(@Valid @RequestBody PurgeTenant request) {
     accounts.purgeTenant(request.tenantId());
@@ -79,6 +87,8 @@ public class AccountController {
       @NotBlank @Size(min = 6, max = 1024) String newPassword) {}
 
   public record Revoke(@NotBlank @Size(max = 200) String identityId) {}
+
+  public record TwoFactorReset(boolean reset) {}
 
   public record PurgeTenant(@NotBlank @Size(max = 200) String tenantId) {}
 }

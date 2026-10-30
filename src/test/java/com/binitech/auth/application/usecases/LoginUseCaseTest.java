@@ -30,6 +30,7 @@ class LoginUseCaseTest {
   private final TwoFactorChallengeRepositoryPort challenges =
       mock(TwoFactorChallengeRepositoryPort.class);
   private final TotpPort totp = mock(TotpPort.class);
+  private final RecoveryCodePort recoveryCodes = mock(RecoveryCodePort.class);
   private final LoginUseCase useCase =
       new LoginUseCase(
           identities,
@@ -41,6 +42,7 @@ class LoginUseCaseTest {
           twoFactor,
           challenges,
           totp,
+          recoveryCodes,
           Clock.fixed(now, ZoneOffset.UTC));
   private final Identity user = new Identity("user1", "admin", "hash", "OPERATOR", "tenant1", true);
 
@@ -64,7 +66,7 @@ class LoginUseCaseTest {
     when(passwords.matches("password", "hash")).thenReturn(true);
     when(revocations.sessionVersion("user1")).thenReturn(3L);
     when(twoFactor.find("user1"))
-        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 10L, null)));
+        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 10L, null, null)));
 
     var result = useCase.login("admin", "password", "tenant1");
 
@@ -87,7 +89,7 @@ class LoginUseCaseTest {
     when(identities.findById("user1")).thenReturn(Optional.of(user));
     when(revocations.sessionVersion("user1")).thenReturn(3L);
     when(twoFactor.find("user1"))
-        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 10L, null)));
+        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 10L, null, null)));
     when(totp.verify("secret", "123456", now)).thenReturn(OptionalLong.of(11L));
     when(twoFactor.markUsed("user1", 11L)).thenReturn(true);
     when(challenges.consume(digest)).thenReturn(true);
@@ -97,13 +99,35 @@ class LoginUseCaseTest {
   }
 
   @Test
+  void completeTwoFactorLoginAcceptsRecoveryCodeInsteadOfTotp() {
+    String digest = AccountLifecycleUseCase.digest("challenge");
+    when(challenges.attempt(digest, now, 5))
+        .thenReturn(
+            Optional.of(
+                new PendingTwoFactorLogin(digest, "user1", "tenant1", 3L, now.plusSeconds(60))));
+    when(identities.findById("user1")).thenReturn(Optional.of(user));
+    when(revocations.sessionVersion("user1")).thenReturn(3L);
+    when(twoFactor.find("user1"))
+        .thenReturn(
+            Optional.of(new TwoFactorEnrollment("secret", null, 10L, null, List.of("hash1"))));
+    when(recoveryCodes.digest("ABCDE-FGHJK")).thenReturn(Optional.of("hash1"));
+    when(twoFactor.useRecoveryCode("user1", "secret", "hash1")).thenReturn(true);
+    when(challenges.consume(digest)).thenReturn(true);
+    when(tokens.issue(user, 3L)).thenReturn("access");
+
+    assertEquals(
+        "access", useCase.completeTwoFactorLogin("challenge", "ABCDE-FGHJK").accessToken());
+    verifyNoInteractions(totp);
+  }
+
+  @Test
   void completeTwoFactorLoginRejectsWrongReplayedOrExhaustedCodes() {
     String digest = AccountLifecycleUseCase.digest("challenge");
     var pending = new PendingTwoFactorLogin(digest, "user1", "tenant1", 0L, now.plusSeconds(60));
     when(challenges.attempt(digest, now, 5)).thenReturn(Optional.of(pending));
     when(identities.findById("user1")).thenReturn(Optional.of(user));
     when(twoFactor.find("user1"))
-        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 10L, null)));
+        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 10L, null, null)));
     when(totp.verify("secret", "000000", now)).thenReturn(OptionalLong.empty());
     when(totp.verify("secret", "123456", now)).thenReturn(OptionalLong.of(10L));
 
@@ -136,7 +160,7 @@ class LoginUseCaseTest {
     when(identities.findCandidates("admin", "tenant1")).thenReturn(List.of(user));
     when(passwords.matches("password", "hash")).thenReturn(true);
     when(twoFactor.find("user1"))
-        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 10L, lockedUntil)));
+        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 10L, lockedUntil, null)));
 
     var locked =
         assertThrows(
@@ -156,7 +180,8 @@ class LoginUseCaseTest {
     verifyNoInteractions(totp, tokens);
 
     when(twoFactor.find("user1"))
-        .thenReturn(Optional.of(new TwoFactorEnrollment("secret", null, 10L, now.minusSeconds(1))));
+        .thenReturn(
+            Optional.of(new TwoFactorEnrollment("secret", null, 10L, now.minusSeconds(1), null)));
     assertInstanceOf(TwoFactorChallenge.class, useCase.login("admin", "password", "tenant1"));
   }
 

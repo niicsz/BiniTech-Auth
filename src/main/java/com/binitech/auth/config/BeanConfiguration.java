@@ -37,6 +37,7 @@ public class BeanConfiguration {
       TwoFactorRepositoryPort twoFactor,
       TwoFactorChallengeRepositoryPort challenges,
       TotpPort totp,
+      RecoveryCodePort recoveryCodes,
       @Value("${jwt.refresh-expiration}") long refreshExpiration,
       Clock clock) {
     return new LoginUseCase(
@@ -49,6 +50,7 @@ public class BeanConfiguration {
         twoFactor,
         challenges,
         totp,
+        recoveryCodes,
         clock);
   }
 
@@ -57,7 +59,8 @@ public class BeanConfiguration {
       AuthenticationUseCase authentication,
       TwoFactorRepositoryPort twoFactor,
       TotpPort totp,
+      RecoveryCodePort recoveryCodes,
       Clock clock) {
-    return new TwoFactorUseCase(authentication, twoFactor, totp, clock);
+    return new TwoFactorUseCase(authentication, twoFactor, totp, recoveryCodes, clock);
   }
 }

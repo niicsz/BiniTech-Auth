@@ -6,6 +6,7 @@ import com.binitech.auth.domain.TwoFactorStatus;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
+import java.util.List;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -38,11 +39,19 @@ public class TwoFactorController {
   }
 
   @PostMapping("/enable")
-  public ResponseEntity<Void> enable(
+  public RecoveryCodesResponse enable(
       @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
       @Valid @RequestBody CodeRequest request) {
-    twoFactor.enable(BearerToken.extract(authorization), request.code());
-    return ResponseEntity.noContent().build();
+    return new RecoveryCodesResponse(
+        twoFactor.enable(BearerToken.extract(authorization), request.code()));
+  }
+
+  @PostMapping("/recovery-codes")
+  public RecoveryCodesResponse regenerateRecoveryCodes(
+      @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+      @Valid @RequestBody CodeRequest request) {
+    return new RecoveryCodesResponse(
+        twoFactor.regenerateRecoveryCodes(BearerToken.extract(authorization), request.code()));
   }
 
   @PostMapping("/disable")
@@ -55,5 +64,7 @@ public class TwoFactorController {
 
   public record SetupResponse(String otpauthUri, String algorithm, int digits, long period) {}
 
-  public record CodeRequest(@NotBlank @Pattern(regexp = "\\d{6,8}") String code) {}
+  public record RecoveryCodesResponse(List<String> recoveryCodes) {}
+
+  public record CodeRequest(@NotBlank @Pattern(regexp = TwoFactorCode.PATTERN) String code) {}
 }

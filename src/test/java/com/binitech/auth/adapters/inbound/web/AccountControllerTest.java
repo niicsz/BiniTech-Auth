@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.binitech.auth.application.ports.inbound.AccountLifecycle;
+import com.binitech.auth.application.ports.inbound.TwoFactorManagement;
 import com.binitech.auth.config.SecurityConfiguration;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,6 +25,26 @@ import org.springframework.test.web.servlet.MockMvc;
 class AccountControllerTest {
   @Autowired MockMvc mvc;
   @MockitoBean AccountLifecycle accounts;
+  @MockitoBean TwoFactorManagement twoFactor;
+
+  @Test
+  void twoFactorResetRequiresMachineCredentialAndReportsResult() throws Exception {
+    mvc.perform(
+            post("/api/internal/identities/two-factor/reset")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"identityId\":\"u1\"}"))
+        .andExpect(status().isUnauthorized());
+    verifyNoInteractions(twoFactor);
+
+    when(twoFactor.reset("u1")).thenReturn(true);
+    mvc.perform(
+            post("/api/internal/identities/two-factor/reset")
+                .header("X-Auth-Service-Key", "test-machine-key-with-at-least-32-bytes")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"identityId\":\"u1\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.reset").value(true));
+  }
 
   @Test
   void rejectsMissingMachineCredential() throws Exception {
