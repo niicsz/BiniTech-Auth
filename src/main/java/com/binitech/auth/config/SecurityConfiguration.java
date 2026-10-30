@@ -39,6 +39,7 @@ public class SecurityConfiguration {
                         "/api/auth/logout",
                         "/api/auth/two-factor/setup",
                         "/api/auth/two-factor/enable",
+                        "/api/auth/two-factor/recovery-codes",
                         "/api/auth/two-factor/disable")
                     .permitAll()
                     .requestMatchers(

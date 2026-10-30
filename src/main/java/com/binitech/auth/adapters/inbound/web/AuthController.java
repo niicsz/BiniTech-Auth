@@ -109,7 +109,7 @@ public class AuthController {
 
   public record TwoFactorLoginRequest(
       @NotBlank @Size(max = 200) String challengeToken,
-      @NotBlank @Pattern(regexp = "\\d{6,8}") String code) {}
+      @NotBlank @Pattern(regexp = TwoFactorCode.PATTERN) String code) {}
 
   public record TwoFactorRequired(
       boolean twoFactorRequired, String challengeToken, Instant expiresAt) {}

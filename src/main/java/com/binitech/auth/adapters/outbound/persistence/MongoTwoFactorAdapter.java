@@ -40,7 +40,8 @@ public class MongoTwoFactorAdapter implements TwoFactorRepositoryPort {
                     ((Number) d.getOrDefault("totpLastCounter", -1L)).longValue(),
                     Optional.ofNullable(d.getDate("totpLockedUntil"))
                         .map(Date::toInstant)
-                        .orElse(null)));
+                        .orElse(null),
+                    d.getList("totpRecoveryCodes", String.class, List.of())));
   }
 
   public boolean savePending(String userId, String secret) {
@@ -52,7 +53,8 @@ public class MongoTwoFactorAdapter implements TwoFactorRepositoryPort {
         == 1;
   }
 
-  public boolean activate(String userId, String pendingSecret, long counter) {
+  public boolean activate(
+      String userId, String pendingSecret, long counter, List<String> recoveryCodes) {
     return identities
             .updateOne(
                 identity(userId)
@@ -62,6 +64,7 @@ public class MongoTwoFactorAdapter implements TwoFactorRepositoryPort {
                         "$set",
                         new Document("totpSecret", pendingSecret)
                             .append("totpLastCounter", counter)
+                            .append("totpRecoveryCodes", recoveryCodes)
                             .append("totpEnabledAt", Date.from(Instant.now())))
                     .append("$unset", new Document("totpPendingSecret", "")))
             .getModifiedCount()
@@ -81,22 +84,58 @@ public class MongoTwoFactorAdapter implements TwoFactorRepositoryPort {
         == 1;
   }
 
-  public boolean disable(String userId, String secret, long counter) {
+  public boolean useRecoveryCode(String userId, String secret, String recoveryCode) {
     return identities
             .updateOne(
                 identity(userId)
                     .append("totpSecret", secret)
-                    .append("totpLastCounter", new Document("$lt", counter)),
-                new Document(
-                    "$unset",
-                    new Document("totpSecret", "")
-                        .append("totpPendingSecret", "")
-                        .append("totpLastCounter", "")
-                        .append("totpEnabledAt", "")
-                        .append("totpFailedAttempts", "")
-                        .append("totpLockedUntil", "")))
+                    .append("totpRecoveryCodes", recoveryCode),
+                new Document("$pull", new Document("totpRecoveryCodes", recoveryCode))
+                    .append("$set", new Document("totpFailedAttempts", 0)))
             .getModifiedCount()
         == 1;
+  }
+
+  public boolean replaceRecoveryCodes(String userId, String secret, List<String> recoveryCodes) {
+    return identities
+            .updateOne(
+                identity(userId).append("totpSecret", secret),
+                new Document("$set", new Document("totpRecoveryCodes", recoveryCodes)))
+            .getMatchedCount()
+        == 1;
+  }
+
+  public boolean disable(String userId, String secret) {
+    return identities
+            .updateOne(identity(userId).append("totpSecret", secret), clearTwoFactor())
+            .getModifiedCount()
+        == 1;
+  }
+
+  public boolean reset(String userId) {
+    return identities
+            .updateOne(
+                identity(userId)
+                    .append(
+                        "$or",
+                        List.of(
+                            new Document("totpSecret", new Document("$exists", true)),
+                            new Document("totpPendingSecret", new Document("$exists", true)))),
+                clearTwoFactor())
+            .getModifiedCount()
+        == 1;
+  }
+
+  private static Document clearTwoFactor() {
+    return new Document(
+        "$unset",
+        new Document("totpSecret", "")
+            .append("totpPendingSecret", "")
+            .append("totpLastCounter", "")
+            .append("totpEnabledAt", "")
+            .append("totpFailedAttempts", "")
+            .append("totpLockedUntil", "")
+            .append("totpRecoveryCodes", ""));
   }
 
   public TwoFactorFailure registerFailure(String userId, int maxFailures, Instant lockUntil) {

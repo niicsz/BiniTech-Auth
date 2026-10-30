@@ -24,6 +24,7 @@ public class LoginUseCase implements AuthenticationUseCase {
   private final TwoFactorRepositoryPort twoFactor;
   private final TwoFactorChallengeRepositoryPort challenges;
   private final TotpPort totp;
+  private final RecoveryCodePort recoveryCodes;
   private final String dummyHash;
 
   public LoginUseCase(
@@ -36,6 +37,7 @@ public class LoginUseCase implements AuthenticationUseCase {
       TwoFactorRepositoryPort twoFactor,
       TwoFactorChallengeRepositoryPort challenges,
       TotpPort totp,
+      RecoveryCodePort recoveryCodes,
       Clock clock) {
     if (refreshExpiration <= 0) {
       throw new IllegalArgumentException("JWT_REFRESH_EXPIRATION deve ser positivo.");
@@ -50,6 +52,7 @@ public class LoginUseCase implements AuthenticationUseCase {
     this.twoFactor = twoFactor;
     this.challenges = challenges;
     this.totp = totp;
+    this.recoveryCodes = recoveryCodes;
     this.dummyHash = passwords.encode(UUID.randomUUID().toString());
   }
 
@@ -99,8 +102,8 @@ public class LoginUseCase implements AuthenticationUseCase {
             .filter(TwoFactorEnrollment::enabled)
             .orElseThrow(InvalidCredentialsException::new);
     TwoFactorLockout.ensureUnlocked(enrollment, now);
-    var counter = totp.verify(enrollment.secret(), code, now);
-    if (counter.isEmpty() || !twoFactor.markUsed(identity.id(), counter.getAsLong())) {
+    if (!TwoFactorProof.accept(
+        twoFactor, totp, recoveryCodes, identity.id(), enrollment, code, now)) {
       throw TwoFactorLockout.failure(twoFactor, identity.id(), now);
     }
     if (!challenges.consume(pending.id())) {
