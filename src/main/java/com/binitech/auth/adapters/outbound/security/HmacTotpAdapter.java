@@ -69,7 +69,10 @@ public class HmacTotpAdapter implements TotpPort {
     this.issuer = issuer;
     this.sealKey =
         new SecretKeySpec(
-            mac("HmacSHA256", pepper.getBytes(StandardCharsets.UTF_8), SEAL_CONTEXT), "AES");
+            mac(
+                new SecretKeySpec(pepper.getBytes(StandardCharsets.UTF_8), "HmacSHA256"),
+                SEAL_CONTEXT),
+            "AES");
   }
 
   @Override
@@ -85,18 +88,16 @@ public class HmacTotpAdapter implements TotpPort {
     if (secret == null || code == null || code.length() != digits) {
       return OptionalLong.empty();
     }
-    Optional<Sealed> sealed = unseal(secret);
-    if (sealed.isEmpty()) {
+    Optional<SecretKeySpec> key = unseal(secret);
+    if (key.isEmpty()) {
       return OptionalLong.empty();
     }
-    TotpAlgorithm keyAlgorithm = sealed.get().algorithm();
-    byte[] key = sealed.get().key();
     byte[] supplied = code.getBytes(StandardCharsets.US_ASCII);
     long current = Math.floorDiv(now.getEpochSecond(), period);
     for (long counter = current - window; counter <= current + window; counter++) {
       if (counter >= 0
           && MessageDigest.isEqual(
-              generate(keyAlgorithm, key, counter).getBytes(StandardCharsets.US_ASCII), supplied)) {
+              generate(key.get(), counter).getBytes(StandardCharsets.US_ASCII), supplied)) {
         return OptionalLong.of(counter);
       }
     }
@@ -114,10 +115,10 @@ public class HmacTotpAdapter implements TotpPort {
     return SEALED_PREFIX + Base64.getEncoder().encodeToString(out);
   }
 
-  private Optional<Sealed> unseal(String secret) {
+  private Optional<SecretKeySpec> unseal(String secret) {
     try {
       if (!secret.startsWith(SEALED_PREFIX)) {
-        return Optional.of(new Sealed(algorithm, Base64.getDecoder().decode(secret)));
+        return Optional.of(new SecretKeySpec(Base64.getDecoder().decode(secret), algorithm.mac()));
       }
       byte[] data = Base64.getDecoder().decode(secret.substring(SEALED_PREFIX.length()));
       if (data.length <= IV_LENGTH) {
@@ -132,9 +133,9 @@ public class HmacTotpAdapter implements TotpPort {
         return Optional.empty();
       }
       return Optional.of(
-          new Sealed(
-              TotpAlgorithm.parse(plain.substring(0, separator)),
-              Base64.getDecoder().decode(plain.substring(separator + 1))));
+          new SecretKeySpec(
+              Base64.getDecoder().decode(plain.substring(separator + 1)),
+              TotpAlgorithm.parse(plain.substring(0, separator)).mac()));
     } catch (IllegalArgumentException | IllegalStateException exception) {
       return Optional.empty();
     }
@@ -151,9 +152,8 @@ public class HmacTotpAdapter implements TotpPort {
     }
   }
 
-  private String generate(TotpAlgorithm keyAlgorithm, byte[] key, long counter) {
-    byte[] hash =
-        mac(keyAlgorithm.mac(), key, ByteBuffer.allocate(Long.BYTES).putLong(counter).array());
+  private String generate(SecretKeySpec key, long counter) {
+    byte[] hash = mac(key, ByteBuffer.allocate(Long.BYTES).putLong(counter).array());
     int offset = hash[hash.length - 1] & 0x0f;
     int binary =
         ((hash[offset] & 0x7f) << 24)
@@ -164,10 +164,10 @@ public class HmacTotpAdapter implements TotpPort {
     return "0".repeat(digits - otp.length()) + otp;
   }
 
-  private static byte[] mac(String name, byte[] key, byte[] message) {
+  private static byte[] mac(SecretKeySpec key, byte[] message) {
     try {
-      Mac mac = Mac.getInstance(name);
-      mac.init(new SecretKeySpec(key, name));
+      Mac mac = Mac.getInstance(key.getAlgorithm());
+      mac.init(key);
       return mac.doFinal(message);
     } catch (GeneralSecurityException exception) {
       throw new IllegalStateException(exception);
@@ -192,8 +192,6 @@ public class HmacTotpAdapter implements TotpPort {
   private static String encode(String value) {
     return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
   }
-
-  private record Sealed(TotpAlgorithm algorithm, byte[] key) {}
 
   private static String base32(byte[] data) {
     StringBuilder out = new StringBuilder();
