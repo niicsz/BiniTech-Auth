@@ -24,6 +24,8 @@ public class MongoTwoFactorAdapter implements TwoFactorRepositoryPort {
   private static final String FAILED_ATTEMPTS = "totpFailedAttempts";
   private static final String LOCKED_UNTIL = "totpLockedUntil";
   private static final String RECOVERY_CODES = "totpRecoveryCodes";
+  private static final String SET = "$set";
+  private static final String EXISTS = "$exists";
 
   private final MongoCollection<Document> identities;
   private final String application;
@@ -53,8 +55,8 @@ public class MongoTwoFactorAdapter implements TwoFactorRepositoryPort {
   public boolean savePending(String userId, String secret) {
     return identities
             .updateOne(
-                identity(userId).append(SECRET, new Document("$exists", false)),
-                new Document("$set", new Document(PENDING_SECRET, secret)))
+                identity(userId).append(SECRET, new Document(EXISTS, false)),
+                new Document(SET, new Document(PENDING_SECRET, secret)))
             .getMatchedCount()
         == 1;
   }
@@ -65,9 +67,9 @@ public class MongoTwoFactorAdapter implements TwoFactorRepositoryPort {
             .updateOne(
                 identity(userId)
                     .append(PENDING_SECRET, pendingSecret)
-                    .append(SECRET, new Document("$exists", false)),
+                    .append(SECRET, new Document(EXISTS, false)),
                 new Document(
-                        "$set",
+                        SET,
                         new Document(SECRET, pendingSecret)
                             .append(LAST_COUNTER, counter)
                             .append(RECOVERY_CODES, recoveryCodes)
@@ -81,10 +83,9 @@ public class MongoTwoFactorAdapter implements TwoFactorRepositoryPort {
     return identities
             .updateOne(
                 identity(userId)
-                    .append(SECRET, new Document("$exists", true))
+                    .append(SECRET, new Document(EXISTS, true))
                     .append(LAST_COUNTER, new Document("$lt", counter)),
-                new Document(
-                    "$set", new Document(LAST_COUNTER, counter).append(FAILED_ATTEMPTS, 0)))
+                new Document(SET, new Document(LAST_COUNTER, counter).append(FAILED_ATTEMPTS, 0)))
             .getModifiedCount()
         == 1;
   }
@@ -94,7 +95,7 @@ public class MongoTwoFactorAdapter implements TwoFactorRepositoryPort {
             .updateOne(
                 identity(userId).append(SECRET, secret).append(RECOVERY_CODES, recoveryCode),
                 new Document("$pull", new Document(RECOVERY_CODES, recoveryCode))
-                    .append("$set", new Document(FAILED_ATTEMPTS, 0)))
+                    .append(SET, new Document(FAILED_ATTEMPTS, 0)))
             .getModifiedCount()
         == 1;
   }
@@ -103,7 +104,7 @@ public class MongoTwoFactorAdapter implements TwoFactorRepositoryPort {
     return identities
             .updateOne(
                 identity(userId).append(SECRET, secret),
-                new Document("$set", new Document(RECOVERY_CODES, recoveryCodes)))
+                new Document(SET, new Document(RECOVERY_CODES, recoveryCodes)))
             .getMatchedCount()
         == 1;
   }
@@ -122,8 +123,8 @@ public class MongoTwoFactorAdapter implements TwoFactorRepositoryPort {
                     .append(
                         "$or",
                         List.of(
-                            new Document(SECRET, new Document("$exists", true)),
-                            new Document(PENDING_SECRET, new Document("$exists", true)))),
+                            new Document(SECRET, new Document(EXISTS, true)),
+                            new Document(PENDING_SECRET, new Document(EXISTS, true)))),
                 clearTwoFactor())
             .getModifiedCount()
         == 1;
@@ -145,10 +146,10 @@ public class MongoTwoFactorAdapter implements TwoFactorRepositoryPort {
     Document reachedLimit = new Document("$gte", List.of("$" + FAILED_ATTEMPTS, maxFailures));
     Document after =
         identities.findOneAndUpdate(
-            identity(userId).append(SECRET, new Document("$exists", true)),
+            identity(userId).append(SECRET, new Document(EXISTS, true)),
             List.of(
                 new Document(
-                    "$set",
+                    SET,
                     new Document(
                         FAILED_ATTEMPTS,
                         new Document(
@@ -156,7 +157,7 @@ public class MongoTwoFactorAdapter implements TwoFactorRepositoryPort {
                             List.of(
                                 new Document("$ifNull", List.of("$" + FAILED_ATTEMPTS, 0)), 1)))),
                 new Document(
-                    "$set",
+                    SET,
                     new Document(
                             LOCKED_UNTIL,
                             new Document(
