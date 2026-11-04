@@ -79,7 +79,7 @@ public class LoginUseCase implements AuthenticationUseCase {
       TwoFactorLockout.ensureUnlocked(enrollment.get(), clock.instant());
       return challenge(match, version);
     }
-    return issueSession(match, version);
+    return startExclusiveSession(match);
   }
 
   public AuthResult completeTwoFactorLogin(String challengeToken, String code) {
@@ -109,7 +109,7 @@ public class LoginUseCase implements AuthenticationUseCase {
     if (!challenges.consume(pending.id())) {
       throw new InvalidCredentialsException();
     }
-    return issueSession(identity, version);
+    return startExclusiveSession(identity);
   }
 
   public AuthResult refresh(String token) {
@@ -171,6 +171,12 @@ public class LoginUseCase implements AuthenticationUseCase {
             version,
             expiresAt));
     return new TwoFactorChallenge(token, expiresAt);
+  }
+
+  private AuthResult startExclusiveSession(Identity identity) {
+    long version = revocations.rotate(identity.id());
+    sessions.deleteForUser(identity.id(), identity.tenantId());
+    return issueSession(identity, version);
   }
 
   private AuthResult issueSession(Identity identity, long version) {

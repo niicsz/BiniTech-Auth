@@ -51,13 +51,30 @@ class LoginUseCaseTest {
     when(identities.findCandidates("admin", "tenant1")).thenReturn(List.of(user));
     when(passwords.matches("password", "hash")).thenReturn(true);
     when(revocations.sessionVersion("user1")).thenReturn(7L);
-    when(tokens.issue(user, 7L)).thenReturn("access");
+    when(revocations.rotate("user1")).thenReturn(8L);
+    when(tokens.issue(user, 8L)).thenReturn("access");
     var result = (AuthResult) useCase.login("admin", "password", "tenant1");
     var saved = ArgumentCaptor.forClass(RefreshSession.class);
     verify(sessions).save(saved.capture());
     assertEquals(now.plusSeconds(60), saved.getValue().expiryDate());
-    assertEquals(7L, saved.getValue().sessionVersion());
+    assertEquals(8L, saved.getValue().sessionVersion());
     assertEquals("access", result.accessToken());
+  }
+
+  @Test
+  void newLoginEndsTheSessionOpenedOnAnotherDevice() {
+    when(identities.findCandidates("admin", "tenant1")).thenReturn(List.of(user));
+    when(passwords.matches("password", "hash")).thenReturn(true);
+    when(revocations.sessionVersion("user1")).thenReturn(7L);
+    when(revocations.rotate("user1")).thenReturn(8L);
+    when(tokens.issue(user, 8L)).thenReturn("access");
+
+    useCase.login("admin", "password", "tenant1");
+
+    var order = inOrder(revocations, sessions);
+    order.verify(revocations).rotate("user1");
+    order.verify(sessions).deleteForUser("user1", "tenant1");
+    order.verify(sessions).save(any(RefreshSession.class));
   }
 
   @Test
@@ -93,7 +110,8 @@ class LoginUseCaseTest {
     when(totp.verify("secret", "123456", now)).thenReturn(OptionalLong.of(11L));
     when(twoFactor.markUsed("user1", 11L)).thenReturn(true);
     when(challenges.consume(digest)).thenReturn(true);
-    when(tokens.issue(user, 3L)).thenReturn("access");
+    when(revocations.rotate("user1")).thenReturn(4L);
+    when(tokens.issue(user, 4L)).thenReturn("access");
 
     assertEquals("access", useCase.completeTwoFactorLogin("challenge", "123456").accessToken());
   }
@@ -113,7 +131,8 @@ class LoginUseCaseTest {
     when(recoveryCodes.digest("ABCDE-FGHJK")).thenReturn(Optional.of("hash1"));
     when(twoFactor.useRecoveryCode("user1", "secret", "hash1")).thenReturn(true);
     when(challenges.consume(digest)).thenReturn(true);
-    when(tokens.issue(user, 3L)).thenReturn("access");
+    when(revocations.rotate("user1")).thenReturn(4L);
+    when(tokens.issue(user, 4L)).thenReturn("access");
 
     assertEquals(
         "access", useCase.completeTwoFactorLogin("challenge", "ABCDE-FGHJK").accessToken());
