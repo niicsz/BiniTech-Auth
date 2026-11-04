@@ -76,7 +76,7 @@ public class AccountController {
       @Size(max = 320) String recoveryEmail) {}
 
   public record PasswordChange(
-      @NotBlank String identityId,
+      @NotBlank @Size(max = 200) String identityId,
       @NotBlank @Size(max = 1024) String currentPassword,
       @NotBlank @Size(min = 6, max = 1024) String newPassword) {}
 
