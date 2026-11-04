@@ -104,9 +104,11 @@ class AuthenticationFlowTest {
     var first = authenticate("admin", "password", null);
     var second = authenticate("admin", "password", null);
 
-    assertNotEquals(first.accessToken(), second.accessToken());
-    assertThrows(InvalidCredentialsException.class, () -> login.session(first.accessToken()));
-    assertThrows(InvalidCredentialsException.class, () -> login.refresh(first.refreshToken()));
+    String oldAccess = first.accessToken();
+    String oldRefresh = first.refreshToken();
+    assertNotEquals(oldAccess, second.accessToken());
+    assertThrows(InvalidCredentialsException.class, () -> login.session(oldAccess));
+    assertThrows(InvalidCredentialsException.class, () -> login.refresh(oldRefresh));
     assertEquals(user.id(), login.session(second.accessToken()).userId());
     assertNotNull(login.refresh(second.refreshToken()));
   }
