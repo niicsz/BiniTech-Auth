@@ -89,13 +89,26 @@ class AuthenticationFlowTest {
   }
 
   @Test
-  void loginForAnotherApplication_preservesExistingRefreshSession() {
+  void loginOnAnotherDevice_endsThePreviousSession() {
+    var version = new java.util.concurrent.atomic.AtomicLong();
+    when(revocations.sessionVersion(user.id())).thenAnswer(invocation -> version.get());
+    when(revocations.rotate(user.id())).thenAnswer(invocation -> version.incrementAndGet());
+    doAnswer(
+            invocation -> {
+              refreshSessions.clear();
+              return null;
+            })
+        .when(sessions)
+        .deleteForUser(user.id(), user.tenantId());
+
     var first = authenticate("admin", "password", null);
     var second = authenticate("admin", "password", null);
+
     assertNotEquals(first.accessToken(), second.accessToken());
-    assertNotNull(login.refresh(first.refreshToken()));
+    assertThrows(InvalidCredentialsException.class, () -> login.session(first.accessToken()));
+    assertThrows(InvalidCredentialsException.class, () -> login.refresh(first.refreshToken()));
+    assertEquals(user.id(), login.session(second.accessToken()).userId());
     assertNotNull(login.refresh(second.refreshToken()));
-    verify(sessions, never()).deleteForUser(anyString(), any());
   }
 
   @Test
@@ -216,7 +229,7 @@ class AuthenticationFlowTest {
     login.logout(first.accessToken());
     verify(revocations)
         .blacklist(eq(first.accessToken()), longThat(ttl -> ttl > 0 && ttl <= 60000));
-    verify(sessions).deleteForUser(user.id(), user.tenantId());
+    verify(sessions, times(2)).deleteForUser(user.id(), user.tenantId());
     when(revocations.isBlacklisted(first.accessToken())).thenReturn(true);
     assertThrows(InvalidCredentialsException.class, () -> login.session(first.accessToken()));
   }

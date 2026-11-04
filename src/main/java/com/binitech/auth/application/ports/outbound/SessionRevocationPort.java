@@ -10,4 +10,9 @@ public interface SessionRevocationPort {
   default void revoke(String userId) {
     throw new UnsupportedOperationException();
   }
+
+  default long rotate(String userId) {
+    revoke(userId);
+    return sessionVersion(userId);
+  }
 }

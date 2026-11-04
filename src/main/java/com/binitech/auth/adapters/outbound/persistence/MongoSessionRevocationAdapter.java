@@ -3,6 +3,8 @@ package com.binitech.auth.adapters.outbound.persistence;
 import com.binitech.auth.application.ports.outbound.SessionRevocationPort;
 import com.binitech.auth.application.usecases.AccountLifecycleUseCase;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.FindOneAndUpdateOptions;
+import com.mongodb.client.model.ReturnDocument;
 import com.mongodb.client.model.UpdateOptions;
 import java.time.Clock;
 import java.util.Date;
@@ -30,6 +32,16 @@ public class MongoSessionRevocationAdapter implements SessionRevocationPort {
   public void revoke(String userId) {
     identities.updateOne(
         new Document("_id", userId), new Document("$inc", new Document("sessionVersion", 1L)));
+  }
+
+  @Override
+  public long rotate(String userId) {
+    Document updated =
+        identities.findOneAndUpdate(
+            new Document("_id", userId),
+            new Document("$inc", new Document("sessionVersion", 1L)),
+            new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
+    return updated == null ? -1L : ((Number) updated.get("sessionVersion")).longValue();
   }
 
   public boolean isBlacklisted(String token) {
