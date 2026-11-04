@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class MongoSessionRevocationAdapter implements SessionRevocationPort {
+  private static final String SESSION_VERSION = "sessionVersion";
   private final MongoCollection<Document> identities;
   private final MongoCollection<Document> revoked;
   private final Clock clock;
@@ -26,12 +27,12 @@ public class MongoSessionRevocationAdapter implements SessionRevocationPort {
 
   public long sessionVersion(String userId) {
     Document d = identities.find(new Document("_id", userId)).first();
-    return d == null ? -1L : ((Number) d.getOrDefault("sessionVersion", 0L)).longValue();
+    return d == null ? -1L : ((Number) d.getOrDefault(SESSION_VERSION, 0L)).longValue();
   }
 
   public void revoke(String userId) {
     identities.updateOne(
-        new Document("_id", userId), new Document("$inc", new Document("sessionVersion", 1L)));
+        new Document("_id", userId), new Document("$inc", new Document(SESSION_VERSION, 1L)));
   }
 
   @Override
@@ -39,9 +40,9 @@ public class MongoSessionRevocationAdapter implements SessionRevocationPort {
     Document updated =
         identities.findOneAndUpdate(
             new Document("_id", userId),
-            new Document("$inc", new Document("sessionVersion", 1L)),
+            new Document("$inc", new Document(SESSION_VERSION, 1L)),
             new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
-    return updated == null ? -1L : ((Number) updated.get("sessionVersion")).longValue();
+    return updated == null ? -1L : ((Number) updated.get(SESSION_VERSION)).longValue();
   }
 
   public boolean isBlacklisted(String token) {
