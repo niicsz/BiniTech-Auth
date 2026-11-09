@@ -4,10 +4,11 @@ spring:
   threads:
     virtual:
       enabled: true
+  mongodb:
+    uri: ${AUTH_MONGODB_URI}
+    database: ${AUTH_MONGODB_DATABASE:binitech_auth}
   data:
     mongodb:
-      uri: ${AUTH_MONGODB_URI}
-      database: ${AUTH_MONGODB_DATABASE:binitech_auth}
       auto-index-creation: true
 auth:
   service-key: ${AUTH_SERVICE_KEY}
