@@ -5,7 +5,7 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>3.5.12</version>
+    <version>4.1.2</version>
     <relativePath/>
   </parent>
   <groupId>com.binitech</groupId>
@@ -14,14 +14,10 @@
   <name>BiniTech Auth</name>
   <description>Serviço de autenticação compartilhado entre aplicações.</description>
   <properties>
-    <java.version>21</java.version>
-    <spring-security.version>6.5.10</spring-security.version>
-    <tomcat.version>10.1.54</tomcat.version>
-    <netty.version>4.1.132.Final</netty.version>
-    <log4j2.version>2.25.4</log4j2.version>
+    <java.version>25</java.version>
   </properties>
   <dependencies>
-    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-webmvc</artifactId></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-security</artifactId></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-validation</artifactId></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-data-mongodb</artifactId></dependency>
@@ -31,13 +27,14 @@
     <dependency><groupId>io.jsonwebtoken</groupId><artifactId>jjwt-jackson</artifactId><version>0.12.6</version><scope>runtime</scope></dependency>
     <dependency><groupId>org.bouncycastle</groupId><artifactId>bcprov-jdk18on</artifactId><version>1.85</version></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
-    <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-test</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-webmvc-test</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-security-test</artifactId><scope>test</scope></dependency>
   </dependencies>
   <build>
     <plugins>
       <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId></plugin>
       <plugin>
-        <groupId>com.spotify.fmt</groupId><artifactId>fmt-maven-plugin</artifactId><version>2.25</version>
+        <groupId>com.spotify.fmt</groupId><artifactId>fmt-maven-plugin</artifactId><version>2.29</version>
         <executions><execution><goals><goal>format</goal></goals></execution></executions>
       </plugin>
     </plugins>
