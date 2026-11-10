@@ -10,11 +10,7 @@ on:
         description: Commit a subir (head do PR)
         required: true
 
-permissions:
-  contents: read
-  pull-requests: write
-  checks: read
-  statuses: read
+permissions: {}
 
 concurrency:
   group: homologacao-deploy-${{ inputs.pr }}
@@ -23,6 +19,11 @@ concurrency:
 jobs:
   gate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: read
+      statuses: read
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       SHA: ${{ inputs.sha }}
@@ -88,8 +89,13 @@ jobs:
     needs: gate
     runs-on: ubuntu-latest
     environment: homologacao
+    permissions:
+      contents: read
+      pull-requests: write
     env:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_CLI_VERSION: 5.63.1
+      RAILWAY_CLI_SHA256: cbb559de44cd304cf9d6598a4ea77575035a0e6e3215370bb3b105b8f48235cc
       RAILWAY_SERVICE: ${{ vars.RAILWAY_HOMOLOG_SERVICE }}
       RAILWAY_ENVIRONMENT: ${{ vars.RAILWAY_HOMOLOG_ENVIRONMENT }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -108,19 +114,28 @@ jobs:
             exit 1
           fi
 
+      - name: Instalar a Railway CLI
+        run: |
+          arquivo="railway-v${RAILWAY_CLI_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$arquivo" "https://github.com/railwayapp/cli/releases/download/v${RAILWAY_CLI_VERSION}/$arquivo"
+          echo "$RAILWAY_CLI_SHA256  $RUNNER_TEMP/$arquivo" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/railway"
+          tar -xzf "$RUNNER_TEMP/$arquivo" -C "$RUNNER_TEMP/railway"
+          echo "$RUNNER_TEMP/railway" >> "$GITHUB_PATH"
+
       - name: Anotar o deploy atual
         run: |
-          anterior=$(npx -y @railway/cli@5.63.1 deployment list --service "$RAILWAY_SERVICE" --environment "$RAILWAY_ENVIRONMENT" --limit 1 --json | jq -r '.[0].id // ""')
+          anterior=$(railway deployment list --service "$RAILWAY_SERVICE" --environment "$RAILWAY_ENVIRONMENT" --limit 1 --json | jq -r '.[0].id // ""')
           echo "DEPLOY_ANTERIOR=$anterior" >> "$GITHUB_ENV"
 
       - name: Subir para homologação no Railway
-        run: npx -y @railway/cli@5.63.1 up --ci --service "$RAILWAY_SERVICE" --environment "$RAILWAY_ENVIRONMENT"
+        run: railway up --ci --service "$RAILWAY_SERVICE" --environment "$RAILWAY_ENVIRONMENT"
 
       - name: Healthcheck da homologação
         run: |
           estado=""
           for tentativa in $(seq 1 40); do
-            linha=$(npx -y @railway/cli@5.63.1 deployment list --service "$RAILWAY_SERVICE" --environment "$RAILWAY_ENVIRONMENT" --limit 1 --json | jq -r '.[0] | [.id, .status] | @tsv' || true)
+            linha=$(railway deployment list --service "$RAILWAY_SERVICE" --environment "$RAILWAY_ENVIRONMENT" --limit 1 --json | jq -r '.[0] | [.id, .status] | @tsv' || true)
             id=$(printf '%s' "$linha" | cut -f1)
             estado=$(printf '%s' "$linha" | cut -f2)
             if [ -n "$id" ] && [ "$id" != "$DEPLOY_ANTERIOR" ]; then
@@ -132,6 +147,9 @@ jobs:
                 FAILED|CRASHED|REMOVED|SKIPPED)
                   gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Subi para homologação, mas o deploy terminou como $estado. Veja os logs do deploy no Railway."
                   exit 1
+                  ;;
+                *)
+                  echo "Deploy $id em $estado."
                   ;;
               esac
             fi
