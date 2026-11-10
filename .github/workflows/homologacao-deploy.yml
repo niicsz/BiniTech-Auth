@@ -92,7 +92,6 @@ jobs:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
       RAILWAY_SERVICE: ${{ vars.RAILWAY_HOMOLOG_SERVICE }}
       RAILWAY_ENVIRONMENT: ${{ vars.RAILWAY_HOMOLOG_ENVIRONMENT }}
-      HOMOLOG_URL: ${{ vars.RAILWAY_HOMOLOG_URL }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PR_NUMBER: ${{ inputs.pr }}
       SHA: ${{ inputs.sha }}
@@ -104,34 +103,44 @@ jobs:
 
       - name: Verificar configuração
         run: |
-          if [ -z "$RAILWAY_TOKEN" ] || [ -z "$RAILWAY_SERVICE" ] || [ -z "$RAILWAY_ENVIRONMENT" ] || [ -z "$HOMOLOG_URL" ]; then
-            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Não subi: falta o secret RAILWAY_TOKEN ou alguma variável RAILWAY_HOMOLOG_SERVICE, RAILWAY_HOMOLOG_ENVIRONMENT, RAILWAY_HOMOLOG_URL."
+          if [ -z "$RAILWAY_TOKEN" ] || [ -z "$RAILWAY_SERVICE" ] || [ -z "$RAILWAY_ENVIRONMENT" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Não subi: falta o secret RAILWAY_TOKEN ou alguma variável RAILWAY_HOMOLOG_SERVICE, RAILWAY_HOMOLOG_ENVIRONMENT."
             exit 1
           fi
+
+      - name: Anotar o deploy atual
+        run: |
+          anterior=$(npx -y @railway/cli@5.63.1 deployment list --service "$RAILWAY_SERVICE" --environment "$RAILWAY_ENVIRONMENT" --limit 1 --json | jq -r '.[0].id // ""')
+          echo "DEPLOY_ANTERIOR=$anterior" >> "$GITHUB_ENV"
 
       - name: Subir para homologação no Railway
         run: npx -y @railway/cli@5.63.1 up --ci --service "$RAILWAY_SERVICE" --environment "$RAILWAY_ENVIRONMENT"
 
       - name: Healthcheck da homologação
         run: |
-          ok=0
+          estado=""
           for tentativa in $(seq 1 40); do
-            status=$(curl -s -m 10 -o /tmp/health.json -w '%{http_code}' "$HOMOLOG_URL/actuator/health" || true)
-            if [ "$status" = "200" ] && grep -q '"status":"UP"' /tmp/health.json; then
-              ok=$((ok + 1))
-              if [ "$ok" -ge 3 ]; then
-                echo "Healthcheck UP em 3 verificações seguidas."
-                exit 0
-              fi
-            else
-              ok=0
+            linha=$(npx -y @railway/cli@5.63.1 deployment list --service "$RAILWAY_SERVICE" --environment "$RAILWAY_ENVIRONMENT" --limit 1 --json | jq -r '.[0] | [.id, .status] | @tsv' || true)
+            id=$(printf '%s' "$linha" | cut -f1)
+            estado=$(printf '%s' "$linha" | cut -f2)
+            if [ -n "$id" ] && [ "$id" != "$DEPLOY_ANTERIOR" ]; then
+              case "$estado" in
+                SUCCESS)
+                  echo "Deploy $id passou no healthcheck do Railway."
+                  exit 0
+                  ;;
+                FAILED|CRASHED|REMOVED|SKIPPED)
+                  gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Subi para homologação, mas o deploy terminou como $estado. Veja os logs do deploy no Railway."
+                  exit 1
+                  ;;
+              esac
             fi
             sleep 15
           done
-          echo "Healthcheck não ficou UP a tempo: última resposta $status"
-          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Subi para homologação, mas o healthcheck não ficou UP em 10 minutos. Veja os logs do deploy no Railway."
+          echo "Deploy não ficou SUCCESS a tempo: último estado $estado"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Subi para homologação, mas o deploy não passou no healthcheck do Railway em 10 minutos. Veja os logs do deploy no Railway."
           exit 1
 
       - name: Avisar no PR
         run: |
-          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Subi o commit \`$SHA\` para homologação e o healthcheck está UP."
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Subi o commit \`$SHA\` para homologação e o deploy passou no healthcheck do Railway."
