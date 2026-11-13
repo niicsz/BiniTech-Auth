@@ -1,0 +1,59 @@
+name: Confirmar subida para homologação
+
+on:
+  pull_request:
+    types: [opened, reopened]
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+concurrency:
+  group: homologacao-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  perguntar:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Perguntar no PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Subir para homologação? Responda **sim** ou **não** neste PR."
+
+  interpretar:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: write
+    steps:
+      - name: Ler resposta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMENTARIO: ${{ github.event.comment.body }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          texto=$(printf '%s' "$COMENTARIO" | tr '[:upper:]' '[:lower:]' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')
+          case "$texto" in
+            sim|s|yes)
+              head_sha=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)
+              gh workflow run homologacao-deploy.yml --repo "$GITHUB_REPOSITORY" -f pr="$PR_NUMBER" -f sha="$head_sha"
+              gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Recebi o sim. Vou checar os 5 checks do commit \`$head_sha\`; se algum falhar, não sobe. Depois peço aprovação do environment \`homologacao\`."
+              ;;
+            não|nao|n|no)
+              gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Certo, não sobe para homologação agora."
+              ;;
+            *)
+              echo "Comentário não é resposta à pergunta de homologação."
+              ;;
+          esac
