@@ -1,12 +1,14 @@
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import urllib.error
 import urllib.request
 
-NOTHOLY = os.environ.get("NOTHOLY_BIN", "notholy")
+NOTHOLY = os.environ.get("NOTHOLY_BIN") or shutil.which("notholy") or "notholy"
+GIT = shutil.which("git") or "/usr/bin/git"
 MAX_FILE_CHARS = 150_000
 BATCH_CHARS = 300_000
 MAX_DIFF_CHARS = 400_000
@@ -50,7 +52,7 @@ Sem achados, devolva "findings": []."""
 
 
 def git(*args):
-    return subprocess.run(["git", *args], check=True, capture_output=True, text=True,
+    return subprocess.run([GIT, *args], check=True, capture_output=True, text=True,
                           encoding="utf-8", errors="replace").stdout
 
 
