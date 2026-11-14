@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -158,7 +159,14 @@ def full_review(repo):
     return merge(results), f"projeto inteiro ({len(files)} arquivos)", incomplete
 
 
+def commit_sha(value):
+    if value is None or not re.fullmatch(r"[0-9a-f]{40}", value):
+        raise SystemExit("SHA de commit inválido")
+    return value
+
+
 def diff_review(repo, base, head):
+    base, head = commit_sha(base), commit_sha(head)
     changed = [p for p in git("diff", "--name-only", "--diff-filter=ACMR", f"{base}...{head}").splitlines()
                if reviewable(p)]
     if not changed:
