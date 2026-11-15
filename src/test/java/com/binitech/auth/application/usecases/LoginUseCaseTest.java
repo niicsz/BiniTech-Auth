@@ -47,6 +47,31 @@ class LoginUseCaseTest {
   private final Identity user = new Identity("user1", "admin", "hash", "OPERATOR", "tenant1", true);
 
   @Test
+  void repeatedWrongPasswordsLockTheLoginEvenWithTheRightPassword() {
+    when(identities.findCandidates("admin", "tenant1")).thenReturn(List.of(user));
+    when(passwords.matches("wrong", "hash")).thenReturn(false);
+    when(passwords.matches("password", "hash")).thenReturn(true);
+    for (int i = 0; i < 10; i++) {
+      assertThrows(
+          InvalidCredentialsException.class, () -> useCase.login("admin", "wrong", "tenant1"));
+    }
+    assertThrows(
+        InvalidCredentialsException.class, () -> useCase.login("Admin", "password", "tenant1"));
+    verify(identities, times(10)).findCandidates("admin", "tenant1");
+  }
+
+  @Test
+  void tooManyCandidatesAreRejectedWithoutCheckingEachPassword() {
+    List<Identity> many =
+        java.util.stream.IntStream.range(0, 21)
+            .mapToObj(i -> new Identity("u" + i, "admin", "h" + i, "OPERATOR", "t" + i, true))
+            .toList();
+    when(identities.findCandidates("admin", null)).thenReturn(many);
+    assertThrows(InvalidCredentialsException.class, () -> useCase.login("admin", "x", null));
+    verify(passwords, never()).matches("x", "h0");
+  }
+
+  @Test
   void loginUsesPortsAndInjectedClock() {
     when(identities.findCandidates("admin", "tenant1")).thenReturn(List.of(user));
     when(passwords.matches("password", "hash")).thenReturn(true);

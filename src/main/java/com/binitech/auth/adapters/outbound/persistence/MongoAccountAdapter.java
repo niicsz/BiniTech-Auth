@@ -99,8 +99,17 @@ public class MongoAccountAdapter implements AccountRepositoryPort {
   }
 
   public long purgeTenant(String tenantId) {
-    refreshTokens.deleteMany(new Document("tenantId", tenantId));
-    return identities.deleteMany(scope().append("tenantId", tenantId)).getDeletedCount();
+    Document filter = scope().append("tenantId", tenantId);
+    List<String> userIds =
+        identities
+            .find(filter)
+            .projection(new Document("_id", 1))
+            .map(d -> d.getString("_id"))
+            .into(new ArrayList<>());
+    if (!userIds.isEmpty()) {
+      refreshTokens.deleteMany(new Document("userId", new Document("$in", userIds)));
+    }
+    return identities.deleteMany(filter).getDeletedCount();
   }
 
   private Account map(Document d) {
