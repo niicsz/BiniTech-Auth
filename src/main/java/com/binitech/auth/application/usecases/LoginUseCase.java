@@ -14,6 +14,9 @@ import java.util.UUID;
 public class LoginUseCase implements AuthenticationUseCase {
   private static final Duration TWO_FACTOR_CHALLENGE_TTL = Duration.ofMinutes(5);
   private static final int TWO_FACTOR_MAX_ATTEMPTS = 5;
+  private static final int LOGIN_MAX_FAILURES = 10;
+  private static final Duration LOGIN_FAILURE_WINDOW = Duration.ofMinutes(15);
+  private static final int MAX_CANDIDATES = 20;
   private final IdentityRepositoryPort identities;
   private final RefreshSessionRepositoryPort sessions;
   private final AccessTokenPort tokens;
@@ -26,6 +29,7 @@ public class LoginUseCase implements AuthenticationUseCase {
   private final TotpPort totp;
   private final RecoveryCodePort recoveryCodes;
   private final String dummyHash;
+  private final LoginThrottle throttle;
 
   public LoginUseCase(
       IdentityRepositoryPort identities,
@@ -54,10 +58,30 @@ public class LoginUseCase implements AuthenticationUseCase {
     this.totp = totp;
     this.recoveryCodes = recoveryCodes;
     this.dummyHash = passwords.encode(UUID.randomUUID().toString());
+    this.throttle = new LoginThrottle(LOGIN_MAX_FAILURES, LOGIN_FAILURE_WINDOW, clock);
   }
 
   public LoginOutcome login(String username, String password, String tenantId) {
+    if (throttle.isLocked(username, tenantId)) {
+      passwords.matches(password, dummyHash);
+      throw new InvalidCredentialsException();
+    }
+    try {
+      LoginOutcome outcome = authenticate(username, password, tenantId);
+      throttle.reset(username, tenantId);
+      return outcome;
+    } catch (InvalidCredentialsException exception) {
+      throttle.registerFailure(username, tenantId);
+      throw exception;
+    }
+  }
+
+  private LoginOutcome authenticate(String username, String password, String tenantId) {
     List<Identity> candidates = identities.findCandidates(username, tenantId);
+    if (candidates.size() > MAX_CANDIDATES) {
+      passwords.matches(password, dummyHash);
+      throw new InvalidCredentialsException();
+    }
     if (candidates.isEmpty()) {
       passwords.matches(password, dummyHash);
       throw new InvalidCredentialsException();
