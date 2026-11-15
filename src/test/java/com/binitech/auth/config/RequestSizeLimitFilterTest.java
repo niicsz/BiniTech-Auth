@@ -35,7 +35,8 @@ class RequestSizeLimitFilterTest {
     MockFilterChain chain = new MockFilterChain();
     filter.doFilter(request, new MockHttpServletResponse(), chain);
     HttpServletRequest wrapped = (HttpServletRequest) chain.getRequest();
-    assertThrows(IOException.class, () -> wrapped.getInputStream().readAllBytes());
+    java.io.InputStream body = wrapped.getInputStream();
+    assertThrows(IOException.class, body::readAllBytes);
   }
 
   @Test
