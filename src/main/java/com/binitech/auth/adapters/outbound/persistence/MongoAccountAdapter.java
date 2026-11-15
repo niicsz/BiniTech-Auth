@@ -107,7 +107,8 @@ public class MongoAccountAdapter implements AccountRepositoryPort {
             .map(d -> d.getString("_id"))
             .into(new ArrayList<>());
     if (!userIds.isEmpty()) {
-      refreshTokens.deleteMany(new Document("userId", new Document("$in", userIds)));
+      refreshTokens.deleteMany(
+          new Document("userId", new Document("$in", userIds)).append("tenantId", tenantId));
     }
     return identities.deleteMany(filter).getDeletedCount();
   }

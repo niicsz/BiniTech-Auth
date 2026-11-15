@@ -47,10 +47,16 @@ class MongoAdaptersIT {
         .provision(new Account("x1", "ana", "hash", "t1", true, false, null));
     mongo
         .getCollection("refresh_tokens")
-        .insertOne(new org.bson.Document("token", "r1").append("tenantId", "t1"));
+        .insertOne(
+            new org.bson.Document("token", "r1").append("userId", "a1").append("tenantId", "t1"));
     mongo
         .getCollection("refresh_tokens")
-        .insertOne(new org.bson.Document("token", "r2").append("tenantId", "t2"));
+        .insertOne(
+            new org.bson.Document("token", "r2").append("userId", "b1").append("tenantId", "t2"));
+    mongo
+        .getCollection("refresh_tokens")
+        .insertOne(
+            new org.bson.Document("token", "r3").append("userId", "x1").append("tenantId", "t1"));
 
     assertEquals(2, accounts.purgeTenant("t1"));
 
@@ -58,7 +64,10 @@ class MongoAdaptersIT {
     assertTrue(accounts.find("a2").isEmpty());
     assertTrue(accounts.find("b1").isPresent());
     assertTrue(new MongoAccountAdapter(mongo, "another-app").find("x1").isPresent());
-    assertEquals(1, mongo.getCollection("refresh_tokens").countDocuments());
+    assertEquals(2, mongo.getCollection("refresh_tokens").countDocuments());
+    assertEquals(
+        0,
+        mongo.getCollection("refresh_tokens").countDocuments(new org.bson.Document("token", "r1")));
   }
 
   @Test
