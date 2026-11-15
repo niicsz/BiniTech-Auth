@@ -19,7 +19,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class RequestSizeLimitFilter extends OncePerRequestFilter {
-  static final long MAX_BODY_BYTES = 64 * 1024;
+  static final long MAX_BODY_BYTES = 64L * 1024;
 
   @Override
   protected void doFilterInternal(
