@@ -107,6 +107,8 @@ docker compose up --build
 
 Antes de subir, troque no `.env` os três valores obrigatórios (`AUTH_SERVICE_KEY`, `JWT_SECRET` e `SECURITY_PEPPER`); `openssl rand -base64 48` gera um valor adequado para cada um. O compose sobe o MongoDB em `127.0.0.1:27019` e o serviço em `http://localhost:8081`. A porta do Mongo não conflita com a do compose do PDV.
 
+## Deploy
+
 ```sh
 railway up --project 0fb63aa2-ccbd-4dcb-a451-6324960b0b22 --environment production --service BiniTech-Auth --detach
 ```
