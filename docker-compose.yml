@@ -1,0 +1,37 @@
+services:
+  mongodb:
+    image: mongo:8
+    container_name: binitech-auth-mongo
+    ports:
+      - "127.0.0.1:27019:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  auth:
+    build: .
+    container_name: binitech-auth
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8081:8081"
+    environment:
+      PORT: 8081
+      AUTH_MONGODB_URI: mongodb://mongodb:27017
+      AUTH_MONGODB_DATABASE: ${AUTH_MONGODB_DATABASE:-binitech_auth}
+      AUTH_APPLICATION_ID: ${AUTH_APPLICATION_ID:-pdv}
+      AUTH_SERVICE_KEY: ${AUTH_SERVICE_KEY:?Defina AUTH_SERVICE_KEY no arquivo .env}
+      JWT_SECRET: ${JWT_SECRET:?Defina JWT_SECRET no arquivo .env}
+      SECURITY_PEPPER: ${SECURITY_PEPPER:?Defina SECURITY_PEPPER no arquivo .env}
+      JWT_ACCESS_EXPIRATION: ${JWT_ACCESS_EXPIRATION:-900000}
+      JWT_REFRESH_EXPIRATION: ${JWT_REFRESH_EXPIRATION:-86400000}
+      AUTH_TOTP_ISSUER: ${AUTH_TOTP_ISSUER:-BiniTech}
+      AUTH_CORS_ALLOWED_ORIGINS: ${AUTH_CORS_ALLOWED_ORIGINS:-http://localhost:4200}
+
+volumes:
+  mongo_data:

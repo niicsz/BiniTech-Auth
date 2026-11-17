@@ -97,6 +97,18 @@ O endpoint interno de recuperação retorna destinatário/token apenas ao adapta
 | `AUTH_TOTP_ISSUER` | Emissor exibido no autenticador; `BiniTech` |
 | `AUTH_CORS_ALLOWED_ORIGINS` | Origens separadas por vírgula; `http://localhost:4200` |
 | `PORT` | `8081` |
+
+## Rodar localmente com Docker
+
+```sh
+cp .env.example .env
+docker compose up --build
+```
+
+Antes de subir, troque no `.env` os três valores obrigatórios (`AUTH_SERVICE_KEY`, `JWT_SECRET` e `SECURITY_PEPPER`); `openssl rand -base64 48` gera um valor adequado para cada um. O compose sobe o MongoDB em `127.0.0.1:27019` e o serviço em `http://localhost:8081`. A porta do Mongo não conflita com a do compose do PDV.
+
+## Deploy
+
 ```sh
 railway up --project 0fb63aa2-ccbd-4dcb-a451-6324960b0b22 --environment production --service BiniTech-Auth --detach
 ```
